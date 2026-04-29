@@ -2,7 +2,7 @@
   name: Folder Browser
   metadata:
     description: Adds a folder-first browser with mixed scene and image previews.
-  version: 0.1.0
+  version: 0.1.1
   date: 2026-04-29 00:00:00
   path: folderBrowser.zip
-  sha256: 5998800023ba66ac2dd96c70bd4e7c18ba7b0ef1faaf67542f2b2840ce1e3d49
+  sha256: 121dfacde02cb5d2c512353d3657753dd7448be3c00812d214d633323ff5fdaa

@@ -54,7 +54,7 @@
         folders { ${FOLDER_FIELDS} }
       }
       findScenes(
-        scene_filter: { files_filter: { parent_folder: { value: $folderID, modifier: EQUALS } } }
+        scene_filter: { files_filter: { parent_folder: { value: [$folderID], modifier: EQUALS } } }
         filter: $mediaFilter
       ) {
         count
@@ -74,7 +74,7 @@
         }
       }
       findImages(
-        image_filter: { files_filter: { parent_folder: { value: $folderID, modifier: EQUALS } } }
+        image_filter: { files_filter: { parent_folder: { value: [$folderID], modifier: EQUALS } } }
         filter: $mediaFilter
       ) {
         count
@@ -104,7 +104,7 @@
 
   function childFolderFilter(folderID) {
     return {
-      parent_folder: { value: folderID, modifier: "EQUALS" },
+      parent_folder: { value: [folderID], modifier: "EQUALS" },
       zip_file: { modifier: "IS_NULL" },
     };
   }
