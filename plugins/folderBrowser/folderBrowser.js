@@ -6,14 +6,16 @@
   const { Button, Form } = api.libraries.Bootstrap;
   const { Link, NavLink } = api.libraries.ReactRouterDOM;
   const { FontAwesomeIcon } = api.libraries.ReactFontAwesome;
-  const { faFolder, faFolderOpen } = api.libraries.FontAwesomeSolid;
+  const { faFolder, faFolderOpen, faSyncAlt, faRedoAlt } = api.libraries.FontAwesomeSolid;
 
   const ROUTE = "/folders";
+  const PLUGIN_PACKAGE_ID = "folderBrowser";
   const STATE_KEY = "folderBrowser.state.v1";
   const SCENE_RETURN_PARAM = "folderBrowserReturn";
   const SCENE_PAGE_ROWS = 4;
   const IMAGE_PAGE_ROWS = 5;
   const WALL_GAP = 4;
+  const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
   const DEFAULT_SIDEBAR_WIDTH = 320;
   const MIN_SIDEBAR_WIDTH = 220;
   const MAX_SIDEBAR_WIDTH = 640;
@@ -30,6 +32,17 @@
     { imageWidth: 260, wallHeight: 280 },
     { imageWidth: 320, wallHeight: 340 },
   ];
+  const MOBILE_SIZE_LABELS = ["小", "中", "大"];
+  const MOBILE_VIDEO_SIZE_PRESETS = [
+    { wallHeight: 128, columns: 3 },
+    { wallHeight: 158, columns: 2 },
+    { wallHeight: 230, columns: 1 },
+  ];
+  const MOBILE_IMAGE_SIZE_PRESETS = [
+    { wallHeight: 98, columns: 4 },
+    { wallHeight: 128, columns: 3 },
+    { wallHeight: 190, columns: 2 },
+  ];
   const SORT_OPTIONS = [
     { key: "file_mod_time", label: "修改时间" },
     { key: "created_at", label: "入库时间" },
@@ -39,6 +52,28 @@
   const touchPreviewEnabled =
     window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches ||
     navigator.maxTouchPoints > 0;
+
+  function mobileLayoutNow() {
+    return window.matchMedia?.(MOBILE_LAYOUT_QUERY)?.matches ?? window.innerWidth <= 900;
+  }
+
+  function refreshCurrentPage() {
+    window.location.reload();
+  }
+
+  async function updateFolderBrowserPluginPackage() {
+    const data = await callGQL(INSTALLED_PLUGIN_PACKAGES_QUERY, {});
+    const pluginPackage = data.installedPackages?.find((pkg) => pkg.package_id === PLUGIN_PACKAGE_ID);
+    if (!pluginPackage?.sourceURL) {
+      throw new Error("找不到 Folder Browser 的插件源。");
+    }
+    const fromVersion = pluginPackage.version || "?";
+    const toVersion = pluginPackage.source_package?.version || "?";
+    await callGQL(UPDATE_PLUGIN_PACKAGES_MUTATION, {
+      packages: [{ id: pluginPackage.package_id, sourceURL: pluginPackage.sourceURL }],
+    });
+    return { fromVersion, toVersion };
+  }
 
   function readFolderBrowserState() {
     try {
@@ -140,6 +175,25 @@
       findFolders(folder_filter: $folderFilter, filter: $filter) {
         folders { ${FOLDER_FIELDS} }
       }
+    }
+  `;
+
+  const INSTALLED_PLUGIN_PACKAGES_QUERY = `
+    query FolderBrowserInstalledPluginPackages {
+      installedPackages(type: Plugin) {
+        package_id
+        sourceURL
+        version
+        source_package {
+          version
+        }
+      }
+    }
+  `;
+
+  const UPDATE_PLUGIN_PACKAGES_MUTATION = `
+    mutation FolderBrowserUpdatePluginPackages($packages: [PackageSpecInput!]!) {
+      updatePackages(type: Plugin, packages: $packages)
     }
   `;
 
@@ -306,6 +360,10 @@
     return columns * rows;
   }
 
+  function mobilePageSizeForRows(columns, rows) {
+    return Math.max(1, columns || 1) * rows;
+  }
+
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
   }
@@ -319,8 +377,13 @@
     return mediaAspect(item.width, item.height, 1);
   }
 
-  function completeWallItems(items, contentWidth, wallHeight, allLoaded, aspectForItem) {
+  function completeWallItems(items, contentWidth, wallHeight, allLoaded, aspectForItem, fixedColumns) {
     if (allLoaded || items.length <= 1) return items;
+
+    if (fixedColumns) {
+      const completeCount = Math.floor(items.length / fixedColumns) * fixedColumns;
+      return completeCount > 0 ? items.slice(0, completeCount) : items;
+    }
 
     const usableWidth = contentWidth || 1200;
     let rowWidth = 0;
@@ -784,9 +847,215 @@
     );
   }
 
-  function SceneWallTile({ scene, selected, touchPreviewing, forcePreview, onBeforeOpen, onSelectionChange, onContextMenu }) {
+  function MobileToolbar({
+    currentFolder,
+    activeView,
+    mediaCount,
+    sortState,
+    includeChildren,
+    previewAllVisible,
+    sizeIndex,
+    onOpenFolders,
+    onControlsToggle,
+    controlsOpen,
+    onActiveViewChange,
+    onSortChange,
+    onSizeChange,
+    onIncludeChildrenChange,
+    onPreviewAllVisibleChange,
+  }) {
+    const title = currentFolder ? currentFolder.basename || currentFolder.path : "选择目录";
+    const subtitle = currentFolder ? currentFolder.path : "点目录选择媒体位置";
+
+    return React.createElement(
+      "div",
+      { className: "folder-browser-mobile-toolbar" },
+      React.createElement(
+        "div",
+        { className: "folder-browser-mobile-topbar" },
+        React.createElement(Button, { size: "sm", variant: "secondary", onClick: onOpenFolders }, "目录"),
+        React.createElement(
+          "div",
+          { className: "folder-browser-mobile-title", title: subtitle },
+          React.createElement("span", null, title),
+          React.createElement("small", null, subtitle)
+        ),
+        React.createElement(Button, { size: "sm", variant: controlsOpen ? "primary" : "secondary", onClick: onControlsToggle }, "排序")
+      ),
+      React.createElement(
+        "div",
+        { className: "folder-browser-mobile-viewbar" },
+        React.createElement(
+          "div",
+          { className: "folder-browser-mobile-view-switch folder-browser-mobile-control-cluster" },
+          React.createElement(
+            Button,
+            { size: "sm", variant: activeView === "video" ? "primary" : "secondary", onClick: () => onActiveViewChange("video") },
+            "视频"
+          ),
+          React.createElement(
+            Button,
+            { size: "sm", variant: activeView === "image" ? "primary" : "secondary", onClick: () => onActiveViewChange("image") },
+            "图片"
+          )
+        ),
+        React.createElement("span", { className: "folder-browser-mobile-divider" }),
+        React.createElement(
+          "div",
+          { className: "folder-browser-mobile-size-actions folder-browser-mobile-control-cluster" },
+          MOBILE_SIZE_LABELS.map((label, index) =>
+            React.createElement(
+              Button,
+              {
+                key: label,
+                size: "sm",
+                variant: sizeIndex === index ? "primary" : "secondary",
+                onClick: () => onSizeChange(index),
+              },
+              label
+            )
+          )
+        ),
+        React.createElement("span", { className: "folder-browser-mobile-divider" }),
+        React.createElement(
+          "div",
+          { className: "folder-browser-mobile-quick-actions folder-browser-mobile-control-cluster" },
+          React.createElement(
+            Button,
+            { size: "sm", variant: includeChildren ? "primary" : "secondary", onClick: () => onIncludeChildrenChange(!includeChildren) },
+            "子文件夹"
+          ),
+          activeView === "video"
+            ? React.createElement(
+                Button,
+                { size: "sm", variant: previewAllVisible ? "primary" : "secondary", onClick: () => onPreviewAllVisibleChange(!previewAllVisible) },
+                "自动预览"
+              )
+            : null
+        ),
+        React.createElement("span", { className: "folder-browser-mobile-divider" }),
+        React.createElement(
+          "div",
+          { className: "folder-browser-mobile-count-group folder-browser-mobile-control-cluster" },
+          React.createElement("span", { className: "folder-browser-mobile-count" }, mediaCount)
+        )
+      ),
+      controlsOpen
+        ? React.createElement(
+            React.Fragment,
+            null,
+            React.createElement("div", { className: "folder-browser-mobile-controls-backdrop", onClick: onControlsToggle }),
+            React.createElement(
+              "div",
+              { className: "folder-browser-mobile-controls" },
+              React.createElement(
+                "div",
+                { className: "folder-browser-mobile-control-group" },
+                React.createElement("span", null, "排序"),
+                React.createElement(
+                  "div",
+                  { className: "folder-browser-mobile-chip-row" },
+                  SORT_OPTIONS.map((option) =>
+                    React.createElement(
+                      Button,
+                      {
+                        key: option.key,
+                        size: "sm",
+                        variant: sortState.key === option.key ? "primary" : "secondary",
+                        onClick: () => onSortChange(option.key),
+                      },
+                      `${option.label}${sortState.key === option.key ? (sortState.direction === "DESC" ? "↓" : "↑") : ""}`
+                    )
+                  )
+                )
+              )
+            )
+          )
+        : null
+    );
+  }
+
+  function MobileSelectionBar({ selectedCount, selectedImageCount, onDownload, onMove, onRename, onDelete, onClear }) {
+    if (!selectedCount) return null;
+
+    return React.createElement(
+      "div",
+      { className: "folder-browser-mobile-selection-bar" },
+      React.createElement("span", null, `已选 ${selectedCount}`),
+      React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
+      React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount !== 1, onClick: onRename }, "重命名"),
+      React.createElement(Button, { size: "sm", variant: "secondary", onClick: onMove }, "移动"),
+      React.createElement(Button, { size: "sm", variant: "danger", onClick: onDelete }, "删除"),
+      React.createElement(Button, { size: "sm", variant: "link", onClick: onClear }, "取消")
+    );
+  }
+
+  function NavPluginUpdateButton() {
+    const [status, setStatus] = React.useState("idle");
+    const [versionLabel, setVersionLabel] = React.useState("");
+
+    async function onClick() {
+      if (status === "updating") return;
+      setStatus("updating");
+      try {
+        const result = await updateFolderBrowserPluginPackage();
+        setVersionLabel(`${result.fromVersion} → ${result.toVersion}`);
+        setStatus("done");
+        window.setTimeout(() => {
+          setStatus("idle");
+          setVersionLabel("");
+        }, 7000);
+      } catch (e) {
+        console.error(e);
+        setVersionLabel("");
+        setStatus("error");
+        window.setTimeout(() => setStatus("idle"), 4500);
+      }
+    }
+
+    return React.createElement(
+      Button,
+      {
+        className: "minimal folder-browser-nav-plugin-update",
+        disabled: status === "updating",
+        onClick,
+        title: versionLabel ? `更新已提交：${versionLabel}` : "更新 Folder Browser 插件",
+      },
+      status === "updating"
+        ? "更新中"
+        : status === "done" && versionLabel
+          ? versionLabel
+          : status === "error"
+            ? "更新失败"
+            : "更新插件"
+    );
+  }
+
+  function NavRefreshButton() {
+    return React.createElement(
+      Button,
+      {
+        className: "minimal folder-browser-nav-refresh",
+        onClick: refreshCurrentPage,
+        title: "刷新当前页面",
+      },
+      FontAwesomeIcon
+        ? React.createElement(FontAwesomeIcon, { icon: faSyncAlt || faRedoAlt, className: "fa-icon" })
+        : "刷新"
+    );
+  }
+
+  function wallStyle(wallHeight, mobileColumns) {
+    const style = { "--folder-wall-height": `${wallHeight}px`, "--folder-wall-gap": `${WALL_GAP}px` };
+    if (mobileColumns) style["--folder-mobile-columns"] = mobileColumns;
+    return style;
+  }
+
+  function SceneWallTile({ scene, selected, touchPreviewing, forcePreview, onBeforeOpen, onSelectionChange, onContextMenu, onTouchPreview }) {
     const [previewFailed, setPreviewFailed] = React.useState(false);
     const [hovering, setHovering] = React.useState(false);
+    const longPressRef = React.useRef(null);
+    const touchPreviewTriggeredRef = React.useRef(false);
     const file = primarySceneFile(scene);
     const preview = previewFailed ? null : scene.paths?.preview;
     const screenshot = scene.paths?.screenshot;
@@ -798,6 +1067,45 @@
     const quality = videoQualityLabel(file);
     const duration = formatDuration(file?.duration);
 
+    function clearLongPressTimer() {
+      if (!longPressRef.current) return;
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+
+    function onPointerDown(event) {
+      if (!touchPreviewEnabled || event.pointerType === "mouse") return;
+      touchPreviewTriggeredRef.current = false;
+      clearLongPressTimer();
+      longPressRef.current = window.setTimeout(() => {
+        touchPreviewTriggeredRef.current = true;
+        onTouchPreview?.(scene.id);
+      }, 450);
+    }
+
+    function onPointerUp() {
+      clearLongPressTimer();
+    }
+
+    function onClick(event) {
+      if (touchPreviewTriggeredRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        touchPreviewTriggeredRef.current = false;
+        return;
+      }
+      onBeforeOpen(scene);
+    }
+
+    function onTileContextMenu(event) {
+      if (touchPreviewEnabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      onContextMenu(event, scene);
+    }
+
     return React.createElement(
       Link,
       {
@@ -806,17 +1114,23 @@
         to: `/scenes/${scene.id}?${SCENE_RETURN_PARAM}=1`,
         style: { "--folder-wall-aspect": sceneAspect(scene) },
         title: file?.path || title,
-        onClick: () => onBeforeOpen(scene),
+        onClick,
+        onPointerDown,
+        onPointerUp,
+        onPointerCancel: onPointerUp,
+        onPointerLeave: onPointerUp,
         onMouseEnter: () => setHovering(true),
         onMouseLeave: () => setHovering(false),
         onFocus: () => setHovering(true),
         onBlur: () => setHovering(false),
-        onContextMenu: (event) => onContextMenu(event, scene),
+        draggable: false,
+        onContextMenu: onTileContextMenu,
       },
       source
         ? React.createElement(video ? "video" : "img", {
             src: source,
             alt: title,
+            draggable: false,
             loading: "lazy",
             loop: video,
             muted: true,
@@ -849,12 +1163,12 @@
     );
   }
 
-  function SceneWall({ scenes, wallHeight, fillTail, selectedIDs, touchPreviewSceneID, previewSceneIDs, onBeforeOpen, onSelectionChange, onContextMenu }) {
+  function SceneWall({ scenes, wallHeight, mobileColumns, fillTail, selectedIDs, touchPreviewSceneID, previewSceneIDs, onBeforeOpen, onSelectionChange, onContextMenu, onTouchPreview }) {
     return React.createElement(
       "div",
       {
         className: "folder-browser-media-wall" + (fillTail ? " folder-browser-media-wall-fill-tail" : ""),
-        style: { "--folder-wall-height": `${wallHeight}px`, "--folder-wall-gap": `${WALL_GAP}px` },
+        style: wallStyle(wallHeight, mobileColumns),
       },
       scenes.map((scene) =>
         React.createElement(SceneWallTile, {
@@ -866,6 +1180,7 @@
           onBeforeOpen,
           onSelectionChange,
           onContextMenu,
+          onTouchPreview,
         })
       )
     );
@@ -917,6 +1232,54 @@
   function folderBrowserRouteHref() {
     if (!baseURL || baseURL === "/") return ROUTE;
     return `${baseURL.replace(/\/$/, "")}${ROUTE}`;
+  }
+
+  function appRoutePath(pathname = window.location.pathname) {
+    const basePath = baseURL && baseURL !== "/" ? new URL(baseURL, window.location.origin).pathname.replace(/\/$/, "") : "";
+    const path = pathname.replace(/\/$/, "") || "/";
+    if (basePath && path.startsWith(basePath)) {
+      return path.slice(basePath.length).replace(/\/$/, "") || "/";
+    }
+    return path;
+  }
+
+  function isFolderBrowserPath(pathname = window.location.pathname) {
+    return appRoutePath(pathname) === ROUTE;
+  }
+
+  function isScenePath(pathname = window.location.pathname) {
+    return /^\/scenes\/[^/]+/.test(appRoutePath(pathname));
+  }
+
+  function isHomePath(pathname = window.location.pathname) {
+    return appRoutePath(pathname) === "/";
+  }
+
+  function syncFolderBrowserRouteClass() {
+    document.body?.classList.toggle("folder-browser-route", isFolderBrowserPath());
+    document.body?.classList.toggle("folder-browser-scene-route", isScenePath());
+  }
+
+  function setupFolderBrowserRouteClass() {
+    const sync = () => window.setTimeout(syncFolderBrowserRouteClass, 0);
+    api.Event?.addEventListener?.("stash:location", sync);
+    window.addEventListener("popstate", sync);
+    document.addEventListener("DOMContentLoaded", sync, { once: true });
+    sync();
+  }
+
+  function setupFolderBrowserHomeRedirect() {
+    const redirect = () => {
+      window.setTimeout(() => {
+        if (!isHomePath() || window.location.search || window.location.hash) return;
+        if (document.querySelector('form input[type="password"]')) return;
+        window.location.replace(folderBrowserRouteHref());
+      }, 120);
+    };
+
+    api.Event?.addEventListener?.("stash:location", redirect);
+    window.addEventListener("popstate", redirect);
+    redirect();
   }
 
   function shouldShowFolderReturn(search) {
@@ -982,12 +1345,85 @@
     onRouteChange();
   }
 
-  function ImageWall({ items, wallHeight, fillTail, selectedIDs, onOpen, onSelectionChange, onContextMenu }) {
+  let sceneDetailsButton = null;
+
+  function removeSceneDetailsButton() {
+    if (sceneDetailsButton?.parentElement) {
+      sceneDetailsButton.parentElement.removeChild(sceneDetailsButton);
+    }
+    sceneDetailsButton = null;
+    document.body?.classList.remove("folder-browser-scene-details-open");
+  }
+
+  function syncSceneDetailsButton() {
+    if (!isScenePath() || !mobileLayoutNow()) {
+      removeSceneDetailsButton();
+      return;
+    }
+
+    if (sceneDetailsButton?.parentElement) return;
+
+    sceneDetailsButton = document.createElement("button");
+    sceneDetailsButton.type = "button";
+    sceneDetailsButton.className = "folder-browser-scene-details-toggle";
+    sceneDetailsButton.textContent = "详情";
+    sceneDetailsButton.title = "显示/隐藏视频详情";
+    sceneDetailsButton.addEventListener("click", () => {
+      document.body?.classList.toggle("folder-browser-scene-details-open");
+    });
+    document.body.appendChild(sceneDetailsButton);
+  }
+
+  function setupMobileSceneDetailsMenu() {
+    const sync = () => window.setTimeout(syncSceneDetailsButton, 0);
+    const observer = new MutationObserver(syncSceneDetailsButton);
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+      document.addEventListener(
+        "DOMContentLoaded",
+        () => observer.observe(document.body, { childList: true, subtree: true }),
+        { once: true }
+      );
+    }
+
+    api.Event?.addEventListener?.("stash:location", sync);
+    window.addEventListener("popstate", sync);
+    window.addEventListener("resize", sync);
+    sync();
+  }
+
+  function lockCurrentOrientation() {
+    if (!mobileLayoutNow()) return;
+    const orientation = window.innerWidth > window.innerHeight ? "landscape" : "portrait";
+    screen.orientation?.lock?.(orientation).catch?.(() => {});
+  }
+
+  function setupMobileFullscreenOrientation() {
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (!isScenePath()) return;
+        if (!event.target.closest?.(".vjs-fullscreen-control")) return;
+        lockCurrentOrientation();
+      },
+      true
+    );
+
+    document.addEventListener("fullscreenchange", () => {
+      if (!document.fullscreenElement) {
+        screen.orientation?.unlock?.();
+      }
+    });
+  }
+
+  function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, onOpen, onSelectionChange, onContextMenu }) {
     return React.createElement(
       "div",
       {
         className: "folder-browser-media-wall" + (fillTail ? " folder-browser-media-wall-fill-tail" : ""),
-        style: { "--folder-wall-height": `${wallHeight}px`, "--folder-wall-gap": `${WALL_GAP}px` },
+        style: wallStyle(wallHeight, mobileColumns),
       },
       items.map((item, index) => {
         const selected = selectedIDs.includes(item.imageID);
@@ -1350,13 +1786,18 @@
     const [imageTotal, setImageTotal] = React.useState(0);
     const [scenePage, setScenePage] = React.useState(0);
     const [imagePage, setImagePage] = React.useState(0);
-    const [includeChildren, setIncludeChildren] = React.useState(savedState?.includeChildren ?? false);
+    const [includeChildren, setIncludeChildren] = React.useState(savedState?.includeChildren ?? true);
     const [activeView, setActiveView] = React.useState(savedState?.activeView ?? "video");
     const [sortState, setSortState] = React.useState(savedState?.sortState ?? { key: "created_at", direction: "DESC" });
     const [videoSizeIndex, setVideoSizeIndex] = React.useState(savedState?.videoSizeIndex ?? savedState?.sizeIndex ?? 2);
     const [imageSizeIndex, setImageSizeIndex] = React.useState(savedState?.imageSizeIndex ?? Math.min(3, (savedState?.sizeIndex ?? 2) + 1));
+    const [mobileVideoSizeIndex, setMobileVideoSizeIndex] = React.useState(savedState?.mobileVideoSizeIndex ?? 1);
+    const [mobileImageSizeIndex, setMobileImageSizeIndex] = React.useState(savedState?.mobileImageSizeIndex ?? 1);
     const [sidebarWidth, setSidebarWidth] = React.useState(savedState?.sidebarWidth ?? DEFAULT_SIDEBAR_WIDTH);
     const [sidebarCollapsed, setSidebarCollapsed] = React.useState(savedState?.sidebarCollapsed ?? false);
+    const [isMobileLayout, setIsMobileLayout] = React.useState(mobileLayoutNow);
+    const [mobileFoldersOpen, setMobileFoldersOpen] = React.useState(false);
+    const [mobileControlsOpen, setMobileControlsOpen] = React.useState(false);
     const [previewAllVisible, setPreviewAllVisible] = React.useState(savedState?.previewAllVisible ?? false);
     const [previewVisibleSceneIDs, setPreviewVisibleSceneIDs] = React.useState([]);
     const [lightboxIndex, setLightboxIndex] = React.useState(null);
@@ -1375,6 +1816,29 @@
     const [error, setError] = React.useState("");
 
     React.useEffect(() => {
+      const media = window.matchMedia?.(MOBILE_LAYOUT_QUERY);
+      const update = () => setIsMobileLayout(mobileLayoutNow());
+      update();
+      if (!media) {
+        window.addEventListener("resize", update);
+        return () => window.removeEventListener("resize", update);
+      }
+      media.addEventListener?.("change", update);
+      media.addListener?.(update);
+      return () => {
+        media.removeEventListener?.("change", update);
+        media.removeListener?.(update);
+      };
+    }, []);
+
+    React.useEffect(() => {
+      if (!isMobileLayout) {
+        setMobileFoldersOpen(false);
+        setMobileControlsOpen(false);
+      }
+    }, [isMobileLayout]);
+
+    React.useEffect(() => {
       if (!contentRef.current) return undefined;
       const updateWidth = () => {
         setContentWidth(Math.floor(contentRef.current?.getBoundingClientRect().width || 0));
@@ -1387,7 +1851,7 @@
       const observer = new ResizeObserver(updateWidth);
       observer.observe(contentRef.current);
       return () => observer.disconnect();
-    }, [folderReloadKey, sidebarCollapsed, sidebarWidth]);
+    }, [folderReloadKey, isMobileLayout, sidebarCollapsed, sidebarWidth]);
 
     React.useEffect(() => {
       function closeMenu() {
@@ -1433,6 +1897,8 @@
         sortState,
         videoSizeIndex,
         imageSizeIndex,
+        mobileVideoSizeIndex,
+        mobileImageSizeIndex,
         sidebarWidth,
         sidebarCollapsed,
         previewAllVisible,
@@ -1441,7 +1907,7 @@
         scrollY: pageScrollY(),
         ...overrides,
       });
-    }, [currentFolder, folderTree, includeChildren, activeView, sortState, videoSizeIndex, imageSizeIndex, sidebarWidth, sidebarCollapsed, previewAllVisible, scenePage, imagePage]);
+    }, [currentFolder, folderTree, includeChildren, activeView, sortState, videoSizeIndex, imageSizeIndex, mobileVideoSizeIndex, mobileImageSizeIndex, sidebarWidth, sidebarCollapsed, previewAllVisible, scenePage, imagePage]);
 
     React.useEffect(() => {
       persistFolderState();
@@ -1499,6 +1965,10 @@
               const savedFolderID = savedStateRef.current?.currentFolderID || savedStateRef.current?.currentFolder?.id;
               const restoredFolder = savedFolderID ? findTreeNode(restoredTree, savedFolderID) : null;
               if (restoredFolder) setCurrentFolder(restoredFolder);
+              if (!restoredFolder && restoredTree[0]) {
+                setCurrentFolder(restoredTree[0]);
+                setIncludeChildren(true);
+              }
             }
           }
         } catch (e) {
@@ -1513,27 +1983,43 @@
       };
     }, []);
 
-    const videoSizePreset = VIDEO_SIZE_PRESETS[videoSizeIndex] || VIDEO_SIZE_PRESETS[2];
-    const imageSizePreset = IMAGE_SIZE_PRESETS[imageSizeIndex] || IMAGE_SIZE_PRESETS[3];
-    const activeSizeIndex = activeView === "video" ? videoSizeIndex : imageSizeIndex;
-    const activeSizeMax = activeView === "video" ? VIDEO_SIZE_PRESETS.length - 1 : IMAGE_SIZE_PRESETS.length - 1;
+    const videoSizePreset = isMobileLayout
+      ? MOBILE_VIDEO_SIZE_PRESETS[mobileVideoSizeIndex] || MOBILE_VIDEO_SIZE_PRESETS[1]
+      : VIDEO_SIZE_PRESETS[videoSizeIndex] || VIDEO_SIZE_PRESETS[2];
+    const imageSizePreset = isMobileLayout
+      ? MOBILE_IMAGE_SIZE_PRESETS[mobileImageSizeIndex] || MOBILE_IMAGE_SIZE_PRESETS[1]
+      : IMAGE_SIZE_PRESETS[imageSizeIndex] || IMAGE_SIZE_PRESETS[3];
+    const activeSizeIndex = activeView === "video"
+      ? isMobileLayout ? mobileVideoSizeIndex : videoSizeIndex
+      : isMobileLayout ? mobileImageSizeIndex : imageSizeIndex;
+    const activeSizeMax = activeView === "video"
+      ? (isMobileLayout ? MOBILE_VIDEO_SIZE_PRESETS : VIDEO_SIZE_PRESETS).length - 1
+      : (isMobileLayout ? MOBILE_IMAGE_SIZE_PRESETS : IMAGE_SIZE_PRESETS).length - 1;
     const onActiveSizeChange = React.useCallback(
       (value) => {
-        if (activeView === "video") {
+        if (activeView === "video" && isMobileLayout) {
+          setMobileVideoSizeIndex(value);
+        } else if (activeView === "image" && isMobileLayout) {
+          setMobileImageSizeIndex(value);
+        } else if (activeView === "video") {
           setVideoSizeIndex(value);
         } else {
           setImageSizeIndex(value);
         }
       },
-      [activeView]
+      [activeView, isMobileLayout]
     );
     const scenePageSize = React.useMemo(
-      () => pageSizeForRows(contentWidth, videoSizePreset.wallHeight * 1.75, SCENE_PAGE_ROWS, WALL_GAP),
-      [contentWidth, videoSizePreset.wallHeight]
+      () => isMobileLayout
+        ? mobilePageSizeForRows(videoSizePreset.columns, SCENE_PAGE_ROWS)
+        : pageSizeForRows(contentWidth, videoSizePreset.wallHeight * 1.75, SCENE_PAGE_ROWS, WALL_GAP),
+      [contentWidth, isMobileLayout, videoSizePreset.columns, videoSizePreset.wallHeight]
     );
     const imagePageSize = React.useMemo(
-      () => pageSizeForRows(contentWidth, imageSizePreset.wallHeight * 1.2, IMAGE_PAGE_ROWS, WALL_GAP),
-      [contentWidth, imageSizePreset.wallHeight]
+      () => isMobileLayout
+        ? mobilePageSizeForRows(imageSizePreset.columns, IMAGE_PAGE_ROWS)
+        : pageSizeForRows(contentWidth, imageSizePreset.wallHeight * 1.2, IMAGE_PAGE_ROWS, WALL_GAP),
+      [contentWidth, imageSizePreset.columns, imageSizePreset.wallHeight, isMobileLayout]
     );
 
     React.useEffect(() => {
@@ -1638,6 +2124,10 @@
 
     function onSelectFolder(folder) {
       setCurrentFolder(findTreeNode(folderTree, folder.id) || folder);
+      if (isMobileLayout) {
+        setMobileFoldersOpen(false);
+        setMobileControlsOpen(false);
+      }
     }
 
     async function onToggleFolder(folder) {
@@ -1719,9 +2209,10 @@
           contentWidth,
           videoSizePreset.wallHeight,
           scenes.length >= sceneTotal,
-          sceneAspect
+          sceneAspect,
+          isMobileLayout ? videoSizePreset.columns : null
       ),
-      [visibleVideos, contentWidth, videoSizePreset.wallHeight, scenes.length, sceneTotal]
+      [visibleVideos, contentWidth, isMobileLayout, videoSizePreset.columns, videoSizePreset.wallHeight, scenes.length, sceneTotal]
     );
     const visibleImages = React.useMemo(
       () => pictures,
@@ -1734,9 +2225,10 @@
           contentWidth,
           imageSizePreset.wallHeight,
           images.length >= imageTotal,
-          imageAspect
+          imageAspect,
+          isMobileLayout ? imageSizePreset.columns : null
         ),
-      [visibleImages, contentWidth, imageSizePreset.wallHeight, images.length, imageTotal]
+      [visibleImages, contentWidth, imageSizePreset.columns, imageSizePreset.wallHeight, images.length, imageTotal, isMobileLayout]
     );
     const selectedImages = React.useMemo(
       () => wallImages.filter((item) => selectedImageIDs.includes(item.imageID)),
@@ -1807,69 +2299,6 @@
         setLightboxIndex(wallImages.length ? wallImages.length - 1 : null);
       }
     }, [lightboxIndex, wallImages.length]);
-
-    React.useEffect(() => {
-      if (!touchPreviewEnabled || activeView !== "video" || !wallVideos.length) {
-        setTouchPreviewSceneID(null);
-        return undefined;
-      }
-
-      let raf = 0;
-      function updateTouchPreview() {
-        window.cancelAnimationFrame(raf);
-        raf = window.requestAnimationFrame(() => {
-          const viewportCenter = window.innerHeight / 2;
-          const keepZoneTop = window.innerHeight * 0.2;
-          const keepZoneBottom = window.innerHeight * 0.8;
-          const switchMargin = Math.max(80, videoSizePreset.wallHeight * 0.45);
-          const candidates = [...document.querySelectorAll(".folder-browser-video-wall-tile[data-folder-scene-id]")];
-          let best = null;
-          let currentCandidate = null;
-
-          candidates.forEach((node) => {
-            const rect = node.getBoundingClientRect();
-            const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
-            if (visibleHeight <= 0) return;
-            const visibleRatio = visibleHeight / Math.max(1, rect.height);
-            const center = rect.top + rect.height / 2;
-            const distance = Math.abs(center - viewportCenter);
-            const id = node.getAttribute("data-folder-scene-id");
-            if (id === touchPreviewSceneID) {
-              currentCandidate = { id, distance, visibleRatio, center };
-            }
-            if (visibleRatio < 0.45) return;
-            if (!best || distance < best.distance) {
-              best = { id, distance };
-            }
-          });
-
-          setTouchPreviewSceneID((current) => {
-            if (!best?.id) return null;
-            if (current === best.id) return current;
-            if (
-              currentCandidate?.id === current &&
-              currentCandidate.visibleRatio >= 0.3 &&
-              currentCandidate.center >= keepZoneTop &&
-              currentCandidate.center <= keepZoneBottom &&
-              best.distance + switchMargin >= currentCandidate.distance
-            ) {
-              return current;
-            }
-            return best.id;
-          });
-        });
-      }
-
-      const scrollRoot = scrollAreaRef.current;
-      updateTouchPreview();
-      scrollRoot?.addEventListener("scroll", updateTouchPreview, { passive: true });
-      window.addEventListener("resize", updateTouchPreview);
-      return () => {
-        window.cancelAnimationFrame(raf);
-        scrollRoot?.removeEventListener("scroll", updateTouchPreview);
-        window.removeEventListener("resize", updateTouchPreview);
-      };
-    }, [activeView, touchPreviewSceneID, wallVideos.length, videoSizePreset.wallHeight]);
 
     React.useEffect(() => {
       if (!previewAllVisible || activeView !== "video" || !wallVideos.length) {
@@ -2331,97 +2760,140 @@
       }
     }
 
+    function renderSidebar(className, includeResizer) {
+      return React.createElement(
+        "aside",
+        { className },
+        React.createElement(FileActionToolbar, {
+          currentFolder,
+          selectedCount: selectedMediaCount,
+          selectedImageCount: selectedImages.length,
+          selectedSceneCount: selectedScenes.length,
+          onDownload: downloadSelectedImages,
+          onRename: renameSelectedMedia,
+          onMove: moveSelectedMedia,
+          onDelete: deleteSelectedMedia,
+          onClear: clearSelection,
+        }),
+        React.createElement(
+          "div",
+          { className: "folder-browser-tree" },
+          folderTree.map((folder) =>
+            React.createElement(FolderTreeNode, {
+              key: folder.id,
+              folder,
+              depth: 0,
+              currentID: currentFolder?.id,
+              onSelect: onSelectFolder,
+              onToggle: onToggleFolder,
+            })
+          )
+        ),
+        includeResizer
+          ? React.createElement("div", {
+              className: "folder-browser-sidebar-resizer",
+              role: "separator",
+              title: "拖动调整目录宽度",
+              onPointerDown: startSidebarResize,
+              onDoubleClick: () => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH),
+            })
+          : null
+      );
+    }
+
     return React.createElement(
       "div",
       {
-        className: "folder-browser-page" + (sidebarCollapsed ? " sidebar-collapsed" : ""),
+        className: "folder-browser-page" + (sidebarCollapsed ? " sidebar-collapsed" : "") + (isMobileLayout ? " folder-browser-mobile" : ""),
         style: {
           "--folder-browser-sidebar-width": `${sidebarWidth}px`,
         },
       },
       loading ? React.createElement("div", { className: "folder-browser-loading" }, "Loading...") : null,
       error ? React.createElement("div", { className: "folder-browser-error" }, error) : null,
-      React.createElement(
-        Button,
-        {
-          className: "folder-browser-sidebar-collapse",
-          size: "sm",
-          variant: "secondary",
-          onClick: () => setSidebarCollapsed(!sidebarCollapsed),
-          title: sidebarCollapsed ? "展开目录树" : "收起目录树",
-        },
-        sidebarCollapsed ? "›" : "‹"
-      ),
+      !isMobileLayout
+        ? React.createElement(
+            Button,
+            {
+              className: "folder-browser-sidebar-collapse",
+              size: "sm",
+              variant: "secondary",
+              onClick: () => setSidebarCollapsed(!sidebarCollapsed),
+              title: sidebarCollapsed ? "展开目录树" : "收起目录树",
+            },
+            sidebarCollapsed ? "›" : "‹"
+          )
+        : null,
+      isMobileLayout && mobileFoldersOpen
+        ? React.createElement(
+            React.Fragment,
+            null,
+            React.createElement("div", { className: "folder-browser-mobile-drawer-backdrop", onClick: () => setMobileFoldersOpen(false) }),
+            renderSidebar("folder-browser-sidebar folder-browser-mobile-drawer", false)
+          )
+        : null,
       React.createElement(
         "div",
         { className: "folder-browser-shell" },
-        sidebarCollapsed
-          ? null
-          : React.createElement(
-              "aside",
-              { className: "folder-browser-sidebar" },
-              React.createElement(FileActionToolbar, {
-                currentFolder,
-                selectedCount: selectedMediaCount,
-                selectedImageCount: selectedImages.length,
-                selectedSceneCount: selectedScenes.length,
-                onDownload: downloadSelectedImages,
-                onRename: renameSelectedMedia,
-                onMove: moveSelectedMedia,
-                onDelete: deleteSelectedMedia,
-                onClear: clearSelection,
-              }),
-              React.createElement(
-                "div",
-                { className: "folder-browser-tree" },
-                folderTree.map((folder) =>
-                  React.createElement(FolderTreeNode, {
-                    key: folder.id,
-                    folder,
-                    depth: 0,
-                    currentID: currentFolder?.id,
-                    onSelect: onSelectFolder,
-                    onToggle: onToggleFolder,
-                  })
-                )
-              ),
-              React.createElement("div", {
-                className: "folder-browser-sidebar-resizer",
-                role: "separator",
-                title: "拖动调整目录宽度",
-                onPointerDown: startSidebarResize,
-                onDoubleClick: () => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH),
-              })
-            ),
+        !isMobileLayout && !sidebarCollapsed ? renderSidebar("folder-browser-sidebar", true) : null,
         React.createElement(
           "main",
           { className: "folder-browser-content", ref: contentRef },
           React.createElement(
             "div",
             { className: "folder-browser-sticky-controls", ref: stickyRef },
-            React.createElement(Breadcrumbs, {
-              currentFolder,
-              includeChildren,
-              activeView,
-              sortState,
-              sizeIndex: activeSizeIndex,
-              sizeMax: activeSizeMax,
-              previewAllVisible,
-              mediaCount: activeView === "video" ? `${wallVideos.length}/${sceneTotal}` : `${wallImages.length}/${imageTotal}`,
-              allSelected: activeView === "video" ? allWallVideosSelected : allWallImagesSelected,
-              someSelected: activeView === "video" ? someWallVideosSelected : someWallImagesSelected,
-              onSelectAllChange: activeView === "video" ? toggleAllScenes : toggleAllImages,
-              onIncludeChildrenChange: setIncludeChildren,
-              onActiveViewChange: setActiveView,
-              onSortChange,
-              onSizeChange: onActiveSizeChange,
-              onPreviewAllVisibleChange: setPreviewAllVisible,
-              onOpen: onSelectFolder,
-            })
+            isMobileLayout
+              ? React.createElement(MobileToolbar, {
+                  currentFolder,
+                  activeView,
+                  mediaCount: activeView === "video" ? `${wallVideos.length}/${sceneTotal}` : `${wallImages.length}/${imageTotal}`,
+                  sortState,
+                  includeChildren,
+                  previewAllVisible,
+                  sizeIndex: activeSizeIndex,
+                  controlsOpen: mobileControlsOpen,
+                  onControlsToggle: () => setMobileControlsOpen((current) => !current),
+                  onOpenFolders: () => setMobileFoldersOpen(true),
+                  onActiveViewChange: setActiveView,
+                  onSortChange,
+                  onSizeChange: onActiveSizeChange,
+                  onIncludeChildrenChange: setIncludeChildren,
+                  onPreviewAllVisibleChange: setPreviewAllVisible,
+                })
+              : React.createElement(Breadcrumbs, {
+                  currentFolder,
+                  includeChildren,
+                  activeView,
+                  sortState,
+                  sizeIndex: activeSizeIndex,
+                  sizeMax: activeSizeMax,
+                  previewAllVisible,
+                  mediaCount: activeView === "video" ? `${wallVideos.length}/${sceneTotal}` : `${wallImages.length}/${imageTotal}`,
+                  allSelected: activeView === "video" ? allWallVideosSelected : allWallImagesSelected,
+                  someSelected: activeView === "video" ? someWallVideosSelected : someWallImagesSelected,
+                  onSelectAllChange: activeView === "video" ? toggleAllScenes : toggleAllImages,
+                  onIncludeChildrenChange: setIncludeChildren,
+                  onActiveViewChange: setActiveView,
+                  onSortChange,
+                  onSizeChange: onActiveSizeChange,
+                  onPreviewAllVisibleChange: setPreviewAllVisible,
+                  onOpen: onSelectFolder,
+                })
           ),
           React.createElement(
             "div",
-            { className: "folder-browser-scroll-area", ref: scrollAreaRef, onScroll: () => setContextMenu(null) },
+            {
+              className: "folder-browser-scroll-area",
+              ref: scrollAreaRef,
+              onClick: (event) => {
+                if (!event.target.closest?.(".folder-browser-wall-tile")) setTouchPreviewSceneID(null);
+              },
+              onScroll: () => {
+                setContextMenu(null);
+                setMobileControlsOpen(false);
+                setTouchPreviewSceneID(null);
+              },
+            },
             React.createElement(
               "div",
               { className: "folder-browser-sections" },
@@ -2432,6 +2904,7 @@
                     React.createElement(SceneWall, {
                       scenes: wallVideos,
                       wallHeight: videoSizePreset.wallHeight,
+                      mobileColumns: isMobileLayout ? videoSizePreset.columns : undefined,
                       fillTail: scenes.length >= sceneTotal,
                       selectedIDs: selectedSceneIDs,
                       touchPreviewSceneID,
@@ -2439,6 +2912,7 @@
                       onBeforeOpen: (scene) => persistFolderState({ lastOpenedSceneID: scene.id }),
                       onSelectionChange: toggleSceneSelection,
                       onContextMenu: (event, scene) => openMediaContextMenu(event, "video", scene),
+                      onTouchPreview: setTouchPreviewSceneID,
                     }),
                     React.createElement(AutoLoadMore, {
                       innerRef: loadMoreRef,
@@ -2454,6 +2928,7 @@
                     React.createElement(ImageWall, {
                       items: wallImages,
                       wallHeight: imageSizePreset.wallHeight,
+                      mobileColumns: isMobileLayout ? imageSizePreset.columns : undefined,
                       fillTail: images.length >= imageTotal,
                       selectedIDs: selectedImageIDs,
                       onOpen: openImagePreview,
@@ -2511,7 +2986,18 @@
             onMove: moveContextMedia,
             onDelete: deleteContextMedia,
             onClose: () => setContextMenu(null),
-          })
+          }),
+          isMobileLayout
+            ? React.createElement(MobileSelectionBar, {
+                selectedCount: selectedMediaCount,
+                selectedImageCount: selectedImages.length,
+                onDownload: downloadSelectedImages,
+                onMove: moveSelectedMedia,
+                onRename: renameSelectedMedia,
+                onDelete: deleteSelectedMedia,
+                onClear: clearSelection,
+              })
+            : null
         )
       )
     );
@@ -2519,7 +3005,11 @@
 
   api.register.route(ROUTE, FolderBrowserPage);
 
+  setupFolderBrowserRouteClass();
+  setupFolderBrowserHomeRedirect();
   setupPlayerReturnButton();
+  setupMobileSceneDetailsMenu();
+  setupMobileFullscreenOrientation();
 
   api.patch.before("MainNavBar.MenuItems", function (props) {
     const children = React.Children.toArray(props.children);
@@ -2545,7 +3035,7 @@
         FontAwesomeIcon
           ? React.createElement(FontAwesomeIcon, {
               icon: faFolderOpen || faFolder,
-              className: "nav-menu-icon d-block d-xl-inline mb-2 mb-xl-0",
+              className: "fa-icon nav-menu-icon d-block d-xl-inline mb-2 mb-xl-0",
             })
           : null,
         React.createElement("span", null, "Folders")
@@ -2558,4 +3048,24 @@
       },
     ];
   });
+
+  api.patch.before("MainNavBar.UtilityItems", function (props) {
+    const children = React.Children.toArray(props.children);
+    if (children.some((child) => child?.key === "folder-browser-nav-refresh")) {
+      return [props];
+    }
+
+    return [
+      {
+        children: React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(NavRefreshButton, { key: "folder-browser-nav-refresh" }),
+          React.createElement(NavPluginUpdateButton, { key: "folder-browser-nav-plugin-update" }),
+          props.children
+        ),
+      },
+    ];
+  });
+
 })();

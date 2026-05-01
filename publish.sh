@@ -1,23 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="${1:-stash-folder-browser-plugin-source}"
+message="${1:-Publish Folder Browser Stash plugin source}"
 
-if ! gh auth status >/dev/null 2>&1; then
-  echo "GitHub CLI is not authenticated. Run: gh auth login -h github.com" >&2
+if [ ! -d .git ]; then
+  echo "Run this script from the plugin source repository root." >&2
   exit 1
 fi
 
-if [ ! -d .git ]; then
-  git init
-  git branch -M main
-fi
-
 git add .
-git commit -m "Publish Folder Browser Stash plugin source" || true
-gh repo create "$repo" --public --source . --push
+git commit -m "$message" || true
+git push origin main
 
 echo
 echo "Repository pushed."
-echo "Add this source URL to Stash:"
-echo "https://raw.githubusercontent.com/$(gh api user --jq .login)/${repo}/main/index.yml"
+echo "Stash source URL:"
+echo "https://raw.githubusercontent.com/Warden630/stash-folder-browser-plugin-source/main/index.yml"
