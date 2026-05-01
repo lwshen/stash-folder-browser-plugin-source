@@ -1361,7 +1361,14 @@
       return;
     }
 
-    if (sceneDetailsButton?.parentElement) return;
+    const player = document.querySelector(".video-js");
+    if (!player) return;
+
+    if (sceneDetailsButton?.parentElement === player) return;
+
+    if (sceneDetailsButton?.parentElement) {
+      sceneDetailsButton.parentElement.removeChild(sceneDetailsButton);
+    }
 
     sceneDetailsButton = document.createElement("button");
     sceneDetailsButton.type = "button";
@@ -1371,7 +1378,8 @@
     sceneDetailsButton.addEventListener("click", () => {
       document.body?.classList.toggle("folder-browser-scene-details-open");
     });
-    document.body.appendChild(sceneDetailsButton);
+    player.classList.add("folder-browser-return-host");
+    player.appendChild(sceneDetailsButton);
   }
 
   function setupMobileSceneDetailsMenu() {
@@ -1394,9 +1402,21 @@
     sync();
   }
 
+  function activeSceneVideoOrientation() {
+    const video = document.querySelector(".video-js video, video");
+    const width = video?.videoWidth || video?.clientWidth || 0;
+    const height = video?.videoHeight || video?.clientHeight || 0;
+    if (width && height) return width >= height ? "landscape" : "portrait";
+    const wrapper = document.querySelector(".VideoPlayer");
+    if (wrapper?.classList.contains("portrait")) return "portrait";
+    return window.innerWidth >= window.innerHeight ? "landscape" : "portrait";
+  }
+
   function lockCurrentOrientation() {
     if (!mobileLayoutNow()) return;
-    const orientation = window.innerWidth > window.innerHeight ? "landscape" : "portrait";
+    const orientation = activeSceneVideoOrientation();
+    document.body?.classList.toggle("folder-browser-force-landscape-fullscreen", orientation === "landscape");
+    document.body?.classList.toggle("folder-browser-force-portrait-fullscreen", orientation === "portrait");
     screen.orientation?.lock?.(orientation).catch?.(() => {});
   }
 
@@ -1407,15 +1427,30 @@
         if (!isScenePath()) return;
         if (!event.target.closest?.(".vjs-fullscreen-control")) return;
         lockCurrentOrientation();
+        window.setTimeout(lockCurrentOrientation, 250);
       },
       true
     );
 
     document.addEventListener("fullscreenchange", () => {
-      if (!document.fullscreenElement) {
+      if (document.fullscreenElement) {
+        lockCurrentOrientation();
+      } else {
         screen.orientation?.unlock?.();
+        document.body?.classList.remove("folder-browser-force-landscape-fullscreen");
+        document.body?.classList.remove("folder-browser-force-portrait-fullscreen");
       }
     });
+    document.addEventListener("webkitfullscreenchange", () => {
+      if (document.webkitFullscreenElement) {
+        lockCurrentOrientation();
+      } else {
+        screen.orientation?.unlock?.();
+        document.body?.classList.remove("folder-browser-force-landscape-fullscreen");
+        document.body?.classList.remove("folder-browser-force-portrait-fullscreen");
+      }
+    });
+    document.addEventListener("webkitbeginfullscreen", lockCurrentOrientation, true);
   }
 
   function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, onOpen, onSelectionChange, onContextMenu }) {

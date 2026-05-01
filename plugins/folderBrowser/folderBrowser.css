@@ -153,7 +153,8 @@
   position: relative;
 }
 
-.video-js .folder-browser-player-return {
+.video-js .folder-browser-player-return,
+.video-js .folder-browser-scene-details-toggle {
   align-items: center;
   background: rgba(0, 0, 0, 0.68);
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -174,15 +175,25 @@
   z-index: 50;
 }
 
+.video-js .folder-browser-scene-details-toggle {
+  left: auto;
+  right: 0.75rem;
+}
+
 .video-js:hover .folder-browser-player-return,
 .video-js.vjs-user-active .folder-browser-player-return,
-.video-js .folder-browser-player-return:focus {
+.video-js .folder-browser-player-return:focus,
+.video-js:hover .folder-browser-scene-details-toggle,
+.video-js.vjs-user-active .folder-browser-scene-details-toggle,
+.video-js .folder-browser-scene-details-toggle:focus {
   opacity: 1;
   pointer-events: auto;
 }
 
 .video-js .folder-browser-player-return:hover,
-.video-js .folder-browser-player-return:focus {
+.video-js .folder-browser-player-return:focus,
+.video-js .folder-browser-scene-details-toggle:hover,
+.video-js .folder-browser-scene-details-toggle:focus {
   background: rgba(0, 0, 0, 0.86);
   color: #fff;
   text-decoration: none;
@@ -1050,6 +1061,7 @@
 @media (max-width: 900px) {
   body.folder-browser-scene-route {
     overflow-x: hidden;
+    padding: 3rem 0 0 0 !important;
   }
 
   body.folder-browser-scene-route:not(.folder-browser-scene-details-open) .scene-tabs {
@@ -1076,20 +1088,29 @@
     display: flex;
     justify-content: center;
     min-height: calc(100dvh - 3rem);
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
+    padding-left: 0;
+    padding-right: 0;
+    width: 100vw;
   }
 
   body.folder-browser-scene-route .VideoPlayer {
     justify-content: center;
     max-height: none;
     min-height: calc(100dvh - 3rem);
-    width: 100%;
+    width: 100vw;
   }
 
   body.folder-browser-scene-route .video-wrapper {
     height: min(56.25vw, calc(100dvh - 5rem));
     max-height: calc(100dvh - 5rem);
+    width: 100vw;
+  }
+
+  body.folder-browser-scene-route .video-js,
+  body.folder-browser-scene-route .video-js video,
+  body.folder-browser-scene-route .video-wrapper video {
+    max-width: 100vw;
+    width: 100% !important;
   }
 
   body.folder-browser-scene-route .VideoPlayer.portrait .video-wrapper {
@@ -1101,22 +1122,11 @@
   }
 
   .folder-browser-scene-details-toggle {
-    background: rgba(24, 26, 32, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 0.35rem;
-    bottom: calc(0.6rem + env(safe-area-inset-bottom));
-    color: #fff;
-    display: block;
-    font-size: 0.86rem;
-    min-height: 2.4rem;
-    padding: 0.35rem 0.7rem;
-    position: fixed;
-    right: calc(0.6rem + env(safe-area-inset-right));
-    z-index: 1090;
+    display: inline-flex;
   }
 
   body.folder-browser-scene-route.folder-browser-scene-details-open .folder-browser-scene-details-toggle {
-    bottom: calc(min(62vh, 34rem) + 0.7rem);
+    background: rgba(13, 110, 253, 0.86);
   }
 
   body.folder-browser-route {
@@ -1124,19 +1134,22 @@
     padding: 3rem 0 0 0 !important;
   }
 
-  body.folder-browser-route .top-nav {
+  body.folder-browser-route .top-nav,
+  body.folder-browser-scene-route .top-nav {
     bottom: auto !important;
     min-height: 2.8rem;
     padding: 0.2rem 0.5rem;
     top: 0 !important;
   }
 
-  body.folder-browser-route .top-nav .navbar-toggler {
+  body.folder-browser-route .top-nav .navbar-toggler,
+  body.folder-browser-scene-route .top-nav .navbar-toggler {
     min-height: 2.35rem;
     padding: 0.25rem 0;
   }
 
-  body.folder-browser-route .top-nav .navbar-collapse {
+  body.folder-browser-route .top-nav .navbar-collapse,
+  body.folder-browser-scene-route .top-nav .navbar-collapse {
     background: rgba(24, 26, 32, 0.98);
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     left: 0;
@@ -1148,18 +1161,42 @@
     top: 2.8rem;
   }
 
-  body.folder-browser-route .top-nav .navbar-nav {
+  body.folder-browser-route .top-nav .navbar-nav,
+  body.folder-browser-scene-route .top-nav .navbar-nav {
     padding-bottom: 0;
   }
 
-  body.folder-browser-route .top-nav .btn {
+  body.folder-browser-route .top-nav .btn,
+  body.folder-browser-scene-route .top-nav .btn {
     min-height: 2.35rem;
     padding-bottom: 0.35rem !important;
     padding-top: 0.35rem !important;
   }
 
-  body.folder-browser-route .top-nav .fa-icon.nav-menu-icon {
+  body.folder-browser-route .top-nav .fa-icon.nav-menu-icon,
+  body.folder-browser-scene-route .top-nav .fa-icon.nav-menu-icon {
     max-height: 1.55rem;
+  }
+
+  body.folder-browser-force-landscape-fullscreen .video-js.vjs-fullscreen,
+  body.folder-browser-force-landscape-fullscreen .video-js:fullscreen,
+  body.folder-browser-force-landscape-fullscreen .video-js:-webkit-full-screen {
+    height: 100vw !important;
+    left: 50% !important;
+    position: fixed !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center center;
+    width: 100vh !important;
+    width: 100dvh !important;
+  }
+
+  body.folder-browser-force-landscape-fullscreen .video-js.vjs-fullscreen video,
+  body.folder-browser-force-landscape-fullscreen .video-js:fullscreen video,
+  body.folder-browser-force-landscape-fullscreen .video-js:-webkit-full-screen video {
+    height: 100% !important;
+    object-fit: contain;
+    width: 100% !important;
   }
 
   .folder-browser-page {
