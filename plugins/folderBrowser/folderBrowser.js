@@ -2195,10 +2195,12 @@
     }
   }
 
-  function scheduleMobilePlayerSingleTap() {
+  function scheduleMobilePlayerSingleTap(shouldTogglePlayback = false) {
     window.clearTimeout(mobileSingleTapTimer);
     showMobilePlayerChrome();
-    mobileSingleTapTimer = window.setTimeout(toggleSceneVideoPlayback, MOBILE_PLAYER_DOUBLE_TAP_MS);
+    if (shouldTogglePlayback) {
+      mobileSingleTapTimer = window.setTimeout(toggleSceneVideoPlayback, MOBILE_PLAYER_DOUBLE_TAP_MS);
+    }
   }
 
   function isMobilePlayerDoubleTap(touch) {
@@ -2231,6 +2233,32 @@
         "button,a,input,select,textarea,.scrubber-wrapper,.vjs-control-bar,.folder-browser-mobile-player-controls,.folder-browser-mobile-sprite-strip"
       )
     );
+  }
+
+  function sceneVideoContentRect(video = sceneVideoElement()) {
+    if (!video) return null;
+    const rect = video.getBoundingClientRect();
+    if (!rect.width || !rect.height) return rect;
+    const mediaWidth = video.videoWidth || rect.width;
+    const mediaHeight = video.videoHeight || rect.height;
+    if (!mediaWidth || !mediaHeight) return rect;
+    const rectRatio = rect.width / rect.height;
+    const mediaRatio = mediaWidth / mediaHeight;
+    if (rectRatio > mediaRatio) {
+      const width = rect.height * mediaRatio;
+      const left = rect.left + (rect.width - width) / 2;
+      return { bottom: rect.bottom, height: rect.height, left, right: left + width, top: rect.top, width };
+    }
+    const height = rect.width / mediaRatio;
+    const top = rect.top + (rect.height - height) / 2;
+    return { bottom: top + height, height, left: rect.left, right: rect.right, top, width: rect.width };
+  }
+
+  function pointInSceneVideoContent(point) {
+    if (!point) return false;
+    const rect = sceneVideoContentRect();
+    if (!rect) return false;
+    return point.clientX >= rect.left && point.clientX <= rect.right && point.clientY >= rect.top && point.clientY <= rect.bottom;
   }
 
   function effectiveVideoDuration(video) {
@@ -2289,6 +2317,7 @@
           lastMoveTime: Date.now(),
           seeking: false,
           startedAt: Date.now(),
+          tapOnVideo: pointInSceneVideoContent(touch),
           targetTime: video?.currentTime || 0,
           velocity: 0,
         };
@@ -2365,7 +2394,7 @@
             }, 320);
           } else {
             stopMobilePlayerEvent(event);
-            scheduleMobilePlayerSingleTap();
+            scheduleMobilePlayerSingleTap(Boolean(mobileGesture.tapOnVideo));
             suppressMobilePlayerClick = true;
             window.setTimeout(() => {
               suppressMobilePlayerClick = false;
@@ -2385,7 +2414,7 @@
       }
       if (!isScenePath() || !mobileLayoutNow() || shouldIgnorePlayerGesture(event.target)) return;
       stopMobilePlayerEvent(event);
-      scheduleMobilePlayerSingleTap();
+      scheduleMobilePlayerSingleTap(pointInSceneVideoContent(event));
     }, { capture: true });
 
     container.addEventListener("dblclick", (event) => {
