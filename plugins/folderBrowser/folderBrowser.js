@@ -248,6 +248,16 @@
     }
   `;
 
+  const SCENE_SPRITES_QUERY = `
+    query FolderBrowserSceneSprites($id: ID!) {
+      findScene(id: $id) {
+        id
+        paths { vtt }
+        files { duration }
+      }
+    }
+  `;
+
   const IMAGES_QUERY = `
     query FolderBrowserImages(
       $folderCriterion: HierarchicalMultiCriterionInput!
@@ -1413,6 +1423,16 @@
   let mobileSourceQualityObserver = null;
   let mobileSourceQualityObservedContainer = null;
   let mobileSourceMenuOutsideCloseSetup = false;
+  let mobileSpriteStrip = null;
+  let mobileSpriteSceneID = null;
+  let mobileSpriteRequestToken = 0;
+  let mobileSpriteVideo = null;
+  let mobileSpriteActiveIndex = -1;
+  let mobileSpriteCues = [];
+  let mobileSpriteButtons = [];
+  let mobileSpriteUserScrollUntil = 0;
+  const mobileSpriteCueCache = new Map();
+  const mobileSpriteImageSizeCache = new Map();
   let mobileGesture = null;
   let lastMobilePlayerTap = null;
   let mobileSingleTapTimer = 0;
@@ -1432,6 +1452,94 @@
 
   function sceneVideoPlayerElement() {
     return document.querySelector(".scene-player-container .video-js, .video-js");
+  }
+
+  function currentSceneID() {
+    const match = appRoutePath().match(/^\/scenes\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  function resolveAssetURL(path, base = window.location.href) {
+    try {
+      return new URL(path, base).toString();
+    } catch {
+      return path;
+    }
+  }
+
+  function formatSpriteTime(seconds) {
+    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    const remainingSeconds = value % 60;
+    if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+    return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+
+  function parseVttTime(value) {
+    const parts = String(value || "").trim().split(":").map(Number);
+    if (parts.some((part) => !Number.isFinite(part))) return 0;
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] || 0;
+  }
+
+  function parseSpriteVtt(text, vttURL) {
+    const cues = [];
+    const lines = String(text || "").split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const timing = lines[index].match(/([0-9:.]+)\s+-->\s+([0-9:.]+)/);
+      if (!timing) continue;
+      let payload = "";
+      for (let next = index + 1; next < lines.length; next += 1) {
+        const line = lines[next].trim();
+        if (!line) break;
+        if (line.includes("#xywh=")) {
+          payload = line;
+          break;
+        }
+      }
+      const sprite = payload.match(/(.+?)#xywh=(\d+),(\d+),(\d+),(\d+)/);
+      if (!sprite) continue;
+      cues.push({
+        start: parseVttTime(timing[1]),
+        end: parseVttTime(timing[2]),
+        imageURL: resolveAssetURL(sprite[1].trim(), vttURL),
+        x: Number(sprite[2]),
+        y: Number(sprite[3]),
+        width: Number(sprite[4]),
+        height: Number(sprite[5]),
+      });
+    }
+    return cues.filter((cue) => cue.width > 0 && cue.height > 0 && cue.imageURL);
+  }
+
+  function loadSpriteImageSize(url) {
+    if (mobileSpriteImageSizeCache.has(url)) return mobileSpriteImageSizeCache.get(url);
+    const promise = new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => resolve(null);
+      image.src = url;
+    });
+    mobileSpriteImageSizeCache.set(url, promise);
+    return promise;
+  }
+
+  async function loadMobileSpriteCues(sceneID) {
+    const data = await callGQL(SCENE_SPRITES_QUERY, { id: sceneID });
+    const vttURL = data.findScene?.paths?.vtt;
+    if (!vttURL) return [];
+    const absoluteVttURL = resolveAssetURL(vttURL);
+    if (mobileSpriteCueCache.has(absoluteVttURL)) return mobileSpriteCueCache.get(absoluteVttURL);
+    const response = await fetch(absoluteVttURL, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`VTT ${response.status}`);
+    const cues = parseSpriteVtt(await response.text(), absoluteVttURL);
+    const imageURLs = [...new Set(cues.map((cue) => cue.imageURL))];
+    const sizes = new Map(await Promise.all(imageURLs.map(async (url) => [url, await loadSpriteImageSize(url)])));
+    const enriched = cues.map((cue) => ({ ...cue, imageSize: sizes.get(cue.imageURL) }));
+    mobileSpriteCueCache.set(absoluteVttURL, enriched);
+    return enriched;
   }
 
   function formatSeekDelta(deltaSeconds) {
@@ -1701,6 +1809,195 @@
     document.addEventListener("click", closeOnOutsidePress, true);
   }
 
+  function ensureMobileSpriteStrip(container) {
+    if (!mobileSpriteStrip) {
+      mobileSpriteStrip = document.createElement("div");
+      mobileSpriteStrip.className = "folder-browser-mobile-sprite-strip";
+      mobileSpriteStrip.setAttribute("aria-label", "Sprite navigation");
+    }
+    if (mobileSpriteStrip.dataset.events !== "1") {
+      const holdChrome = () => {
+        mobileSpriteUserScrollUntil = Date.now() + MOBILE_PLAYER_CHROME_HOLD_MS;
+        showMobilePlayerChrome(MOBILE_PLAYER_CHROME_HOLD_MS);
+      };
+      ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove", "pointerup", "wheel"].forEach((eventName) => {
+        mobileSpriteStrip.addEventListener(eventName, holdChrome, { passive: true });
+      });
+      mobileSpriteStrip.dataset.events = "1";
+    }
+    if (container && mobileSpriteStrip.parentElement !== container) {
+      container.appendChild(mobileSpriteStrip);
+    }
+    return mobileSpriteStrip;
+  }
+
+  function clearMobileSpriteStrip() {
+    mobileSpriteRequestToken += 1;
+    if (mobileSpriteVideo) {
+      mobileSpriteVideo.removeEventListener("timeupdate", syncMobileSpriteActive);
+    }
+    mobileSpriteVideo = null;
+    mobileSpriteSceneID = null;
+    mobileSpriteActiveIndex = -1;
+    mobileSpriteCues = [];
+    mobileSpriteButtons = [];
+    mobileSpriteUserScrollUntil = 0;
+    if (mobileSpriteStrip?.parentElement) {
+      mobileSpriteStrip.parentElement.removeChild(mobileSpriteStrip);
+    }
+    mobileSpriteStrip = null;
+  }
+
+  function mobileSpriteIndexForTime(time) {
+    if (!mobileSpriteCues.length) return -1;
+    let nextIndex = -1;
+    let low = 0;
+    let high = mobileSpriteCues.length - 1;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      if (mobileSpriteCues[middle].start <= time) {
+        nextIndex = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return nextIndex;
+  }
+
+  function centerMobileSpriteButton(index, behavior = "smooth") {
+    const button = mobileSpriteButtons[index];
+    if (!mobileSpriteStrip || !button || mobileSpriteStrip.clientWidth <= 0) return;
+    const targetLeft = button.offsetLeft + button.offsetWidth / 2 - mobileSpriteStrip.clientWidth / 2;
+    mobileSpriteStrip.scrollTo({
+      left: clamp(targetLeft, 0, Math.max(mobileSpriteStrip.scrollWidth - mobileSpriteStrip.clientWidth, 0)),
+      behavior,
+    });
+  }
+
+  function setMobileSpriteActiveIndex(nextIndex, behavior = "smooth", shouldCenter = true) {
+    if (nextIndex === mobileSpriteActiveIndex) {
+      if (shouldCenter) centerMobileSpriteButton(nextIndex, behavior);
+      return;
+    }
+    mobileSpriteButtons[mobileSpriteActiveIndex]?.classList.remove("active");
+    mobileSpriteButtons[nextIndex]?.classList.add("active");
+    mobileSpriteActiveIndex = nextIndex;
+    if (shouldCenter) centerMobileSpriteButton(nextIndex, behavior);
+  }
+
+  function syncMobileSpriteActive(timeOrEvent, behavior = "smooth", options = {}) {
+    if (!mobileSpriteCues.length || !mobileSpriteButtons.length) return;
+    let time = Number.isFinite(timeOrEvent) ? timeOrEvent : undefined;
+    if (time === undefined) {
+      if (mobileGesture?.seeking) return;
+      const video = sceneVideoElement();
+      if (!video) return;
+      time = video.currentTime || 0;
+    }
+    const shouldCenter = options.forceCenter || Date.now() > mobileSpriteUserScrollUntil;
+    setMobileSpriteActiveIndex(mobileSpriteIndexForTime(time), behavior, shouldCenter);
+  }
+
+  function bindMobileSpriteVideo() {
+    const video = sceneVideoElement();
+    if (mobileSpriteVideo === video) {
+      syncMobileSpriteActive();
+      return;
+    }
+    if (mobileSpriteVideo) {
+      mobileSpriteVideo.removeEventListener("timeupdate", syncMobileSpriteActive);
+    }
+    mobileSpriteVideo = video || null;
+    if (mobileSpriteVideo) {
+      mobileSpriteVideo.addEventListener("timeupdate", syncMobileSpriteActive);
+    }
+    syncMobileSpriteActive();
+  }
+
+  function renderMobileSpriteStrip(cues) {
+    if (!mobileSpriteStrip) return;
+    mobileSpriteStrip.textContent = "";
+    mobileSpriteCues = cues;
+    mobileSpriteButtons = [];
+    mobileSpriteActiveIndex = -1;
+    if (!cues.length) {
+      mobileSpriteStrip.hidden = true;
+      return;
+    }
+    mobileSpriteStrip.hidden = false;
+    const fragment = document.createDocumentFragment();
+    cues.forEach((cue, index) => {
+      const button = document.createElement("button");
+      button.className = "folder-browser-mobile-sprite-thumb";
+      button.type = "button";
+      button.title = formatSpriteTime(cue.start);
+      button.setAttribute("aria-label", `Jump to ${formatSpriteTime(cue.start)}`);
+      const scale = cue.imageSize ? clamp(62 / cue.height, 0.35, 1) : 1;
+      button.style.width = `${Math.round(cue.width * scale)}px`;
+      button.style.height = `${Math.round(cue.height * scale)}px`;
+      button.style.backgroundImage = `url("${cue.imageURL.replace(/"/g, '\\"')}")`;
+      button.style.backgroundPosition = `${-cue.x * scale}px ${-cue.y * scale}px`;
+      if (cue.imageSize) {
+        button.style.backgroundSize = `${cue.imageSize.width * scale}px ${cue.imageSize.height * scale}px`;
+      }
+      button.addEventListener("click", (event) => {
+        stopMobilePlayerEvent(event);
+        const video = sceneVideoElement();
+        if (video) {
+          video.currentTime = cue.start;
+          const playAttempt = video.play?.();
+          if (playAttempt?.catch) playAttempt.catch(() => {});
+        }
+        showMobilePlayerChrome();
+        syncMobileSpriteActive(cue.start, "smooth", { forceCenter: true });
+      });
+      mobileSpriteButtons[index] = button;
+      fragment.appendChild(button);
+    });
+    mobileSpriteStrip.appendChild(fragment);
+    bindMobileSpriteVideo();
+    showMobilePlayerChrome();
+  }
+
+  function syncMobileSpriteStrip(container) {
+    if (!container || !isScenePath() || !mobileLayoutNow()) {
+      clearMobileSpriteStrip();
+      return;
+    }
+    const sceneID = currentSceneID();
+    if (!sceneID) {
+      clearMobileSpriteStrip();
+      return;
+    }
+    const strip = ensureMobileSpriteStrip(container);
+    bindMobileSpriteVideo();
+    if (mobileSpriteSceneID === sceneID && strip.dataset.loaded === "1") {
+      syncMobileSpriteActive();
+      return;
+    }
+    if (mobileSpriteSceneID === sceneID && strip.dataset.loading === "1") return;
+    mobileSpriteSceneID = sceneID;
+    strip.hidden = true;
+    strip.dataset.loading = "1";
+    strip.dataset.loaded = "0";
+    const token = (mobileSpriteRequestToken += 1);
+    loadMobileSpriteCues(sceneID)
+      .then((cues) => {
+        if (token !== mobileSpriteRequestToken) return;
+        strip.dataset.loading = "0";
+        strip.dataset.loaded = "1";
+        renderMobileSpriteStrip(cues);
+      })
+      .catch((error) => {
+        if (token !== mobileSpriteRequestToken) return;
+        console.warn("[Folder Browser] Failed to load mobile sprite navigation", error);
+        strip.dataset.loading = "0";
+        strip.dataset.loaded = "1";
+        renderMobileSpriteStrip([]);
+      });
+  }
+
   function clearMobilePlayerMode() {
     window.clearTimeout(mobileChromeTimer);
     window.clearTimeout(mobileChromeFadeTimer);
@@ -1805,7 +2102,7 @@
   function shouldIgnorePlayerGesture(target) {
     return Boolean(
       target.closest?.(
-        "button,a,input,select,textarea,.scrubber-wrapper,.vjs-control-bar,.folder-browser-mobile-player-controls"
+        "button,a,input,select,textarea,.scrubber-wrapper,.vjs-control-bar,.folder-browser-mobile-player-controls,.folder-browser-mobile-sprite-strip"
       )
     );
   }
@@ -1900,6 +2197,8 @@
         mobileGesture.targetTime = targetTime;
         mobileGesture.delta = targetTime - mobileGesture.startTime;
         showSeekFeedback(mobileGesture.delta, targetTime, realDuration);
+        showMobilePlayerChrome(MOBILE_PLAYER_CHROME_HOLD_MS);
+        syncMobileSpriteActive(targetTime, "auto", { forceCenter: true });
       },
       { passive: false, capture: true }
     );
@@ -1916,6 +2215,7 @@
           const targetTime = clamp(mobileGesture.targetTime, 0, realDuration || Number.MAX_SAFE_INTEGER);
           if (video) video.currentTime = targetTime;
           showSeekFeedback(targetTime - mobileGesture.startTime, targetTime, realDuration);
+          syncMobileSpriteActive(targetTime, "smooth", { forceCenter: true });
           suppressMobilePlayerClick = true;
           window.setTimeout(() => {
             suppressMobilePlayerClick = false;
@@ -1980,6 +2280,7 @@
     mobileSourceQualityObserver?.disconnect?.();
     mobileSourceQualityObserver = null;
     mobileSourceQualityObservedContainer = null;
+    clearMobileSpriteStrip();
     clearMobilePlayerMode();
   }
 
@@ -1996,6 +2297,7 @@
     if (mobilePlayerLayer?.parentElement === container) {
       observeMobilePlayerChrome(container);
       observeMobileSourceQualityLabels(container);
+      syncMobileSpriteStrip(container);
       return;
     }
     removeMobilePlayerLayer();
@@ -2033,6 +2335,7 @@
     syncMobilePlayerControlsState();
     observeMobilePlayerChrome(container);
     observeMobileSourceQualityLabels(container);
+    syncMobileSpriteStrip(container);
   }
 
   function setupMobilePlayerLayer() {

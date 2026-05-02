@@ -1274,6 +1274,73 @@
     padding: 0.25rem;
   }
 
+  .folder-browser-mobile-sprite-strip {
+    -webkit-overflow-scrolling: touch;
+    background: rgba(0, 0, 0, 0.54);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.38rem;
+    bottom: calc(5.8rem + env(safe-area-inset-bottom));
+    display: flex;
+    gap: 0.28rem;
+    left: calc(0.55rem + env(safe-area-inset-left));
+    max-height: 5rem;
+    opacity: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.32rem;
+    pointer-events: none;
+    position: absolute;
+    right: calc(0.55rem + env(safe-area-inset-right));
+    scrollbar-width: none;
+    transition: visibility 0.1s, opacity 0.1s;
+    visibility: hidden;
+    z-index: 92;
+  }
+
+  .folder-browser-mobile-sprite-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .folder-browser-mobile-sprite-strip[hidden] {
+    display: none !important;
+  }
+
+  body.folder-browser-scene-route.folder-browser-player-chrome-visible .folder-browser-mobile-sprite-strip {
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
+  }
+
+  body.folder-browser-scene-route.folder-browser-player-chrome-fading .folder-browser-mobile-sprite-strip {
+    opacity: 0;
+    pointer-events: auto;
+    transition: visibility 1s, opacity 1s;
+    visibility: visible;
+  }
+
+  body.folder-browser-scene-route.folder-browser-player-chrome-hidden .folder-browser-mobile-sprite-strip {
+    opacity: 0;
+    pointer-events: none;
+    transition: visibility 1s, opacity 1s;
+    visibility: hidden;
+  }
+
+  .folder-browser-mobile-sprite-thumb {
+    background-color: rgba(255, 255, 255, 0.08);
+    background-repeat: no-repeat;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0.25rem;
+    flex: 0 0 auto;
+    min-height: 2.25rem;
+    min-width: 4rem;
+    padding: 0;
+  }
+
+  .folder-browser-mobile-sprite-thumb.active {
+    border-color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+
   .folder-browser-mobile-player-controls {
     display: flex;
     gap: 0.35rem;
@@ -1405,6 +1472,10 @@
   body.folder-browser-player-landscape .folder-browser-mobile-seek-feedback {
     bottom: calc(3.35rem + env(safe-area-inset-bottom));
     width: var(--folder-browser-seek-width, min(58vh, 22rem));
+  }
+
+  body.folder-browser-player-landscape .folder-browser-mobile-sprite-strip {
+    bottom: calc(5.45rem + env(safe-area-inset-bottom));
   }
 
   body.folder-browser-player-immersive {
