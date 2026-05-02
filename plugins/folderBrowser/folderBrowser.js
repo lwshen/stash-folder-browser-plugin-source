@@ -1301,6 +1301,7 @@
   }
 
   function shouldShowPlayerReturn() {
+    if (isScenePath() && mobileLayoutNow()) return false;
     return /\/scenes\/[^/]+/.test(window.location.pathname) && shouldShowFolderReturn(window.location.search);
   }
 
@@ -1385,6 +1386,659 @@
   function setupMobileSceneDetailsMenu() {
     const sync = () => window.setTimeout(syncSceneDetailsButton, 0);
     const observer = new MutationObserver(syncSceneDetailsButton);
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+      document.addEventListener(
+        "DOMContentLoaded",
+        () => observer.observe(document.body, { childList: true, subtree: true }),
+        { once: true }
+      );
+    }
+
+    api.Event?.addEventListener?.("stash:location", sync);
+    window.addEventListener("popstate", sync);
+    window.addEventListener("resize", sync);
+    sync();
+  }
+
+  let mobilePlayerLayer = null;
+  let seekFeedbackTimer = 0;
+  let mobileChromeTimer = 0;
+  let mobileChromeFadeTimer = 0;
+  let mobileChromeHoldUntil = 0;
+  let mobileChromeObserver = null;
+  let mobileChromeObservedPlayer = null;
+  let mobileSourceQualityObserver = null;
+  let mobileSourceQualityObservedContainer = null;
+  let mobileSourceMenuOutsideCloseSetup = false;
+  let mobileGesture = null;
+  let lastMobilePlayerTap = null;
+  let mobileSingleTapTimer = 0;
+  let suppressMobilePlayerClick = false;
+  const MOBILE_PLAYER_CHROME_HOLD_MS = 5000;
+  const MOBILE_PLAYER_CHROME_FADE_MS = 1000;
+  const MOBILE_PLAYER_DOUBLE_TAP_MS = 320;
+  const MOBILE_PLAYER_DOUBLE_TAP_PX = 48;
+
+  function scenePlayerContainer() {
+    return document.querySelector(".scene-player-container");
+  }
+
+  function sceneVideoElement() {
+    return document.querySelector(".scene-player-container video, .video-js video, video");
+  }
+
+  function sceneVideoPlayerElement() {
+    return document.querySelector(".scene-player-container .video-js, .video-js");
+  }
+
+  function formatSeekDelta(deltaSeconds) {
+    const rounded = Math.round(deltaSeconds);
+    const sign = rounded > 0 ? "+" : rounded < 0 ? "-" : "";
+    const absolute = Math.abs(rounded);
+    if (absolute < 60) return `${sign}${absolute}s`;
+    const minutes = Math.floor(absolute / 60);
+    const seconds = absolute % 60;
+    return `${sign}${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function syncSeekFeedbackBounds(feedback, feedbackHost) {
+    const progressControl = sceneVideoPlayerElement()?.querySelector(".vjs-progress-control");
+    const edgeInset = 15;
+    if (!feedback || !feedbackHost || !progressControl) {
+      feedback?.style?.removeProperty("--folder-browser-seek-left");
+      feedback?.style?.removeProperty("--folder-browser-seek-width");
+      feedback?.style?.removeProperty("--folder-browser-seek-transform");
+      return;
+    }
+
+    let layoutLeft = 0;
+    let current = progressControl;
+    while (current && current !== feedbackHost && current instanceof HTMLElement) {
+      layoutLeft += current.offsetLeft || 0;
+      current = current.offsetParent;
+    }
+
+    if (current === feedbackHost && progressControl.offsetWidth >= 32) {
+      feedback.style.setProperty("--folder-browser-seek-left", `${Math.max(layoutLeft + edgeInset, 0)}px`);
+      feedback.style.setProperty("--folder-browser-seek-width", `${Math.max(progressControl.offsetWidth - edgeInset * 2, 32)}px`);
+      feedback.style.setProperty("--folder-browser-seek-transform", "none");
+      return;
+    }
+
+    const hostRect = feedbackHost.getBoundingClientRect?.();
+    const progressRect = progressControl.getBoundingClientRect?.();
+    const rectWidth = document.body?.classList.contains("folder-browser-player-landscape")
+      ? Math.max(progressRect?.width || 0, progressRect?.height || 0)
+      : progressRect?.width || 0;
+    if (!hostRect || !progressRect || rectWidth < 32 || hostRect.width <= 0) {
+      feedback.style.removeProperty("--folder-browser-seek-left");
+      feedback.style.removeProperty("--folder-browser-seek-width");
+      feedback.style.removeProperty("--folder-browser-seek-transform");
+      return;
+    }
+
+    feedback.style.setProperty(
+      "--folder-browser-seek-left",
+      `${Math.max(progressRect.left - hostRect.left + edgeInset, 0)}px`
+    );
+    feedback.style.setProperty("--folder-browser-seek-width", `${Math.max(rectWidth - edgeInset * 2, 32)}px`);
+    feedback.style.setProperty("--folder-browser-seek-transform", "none");
+  }
+
+  function nativeProgressRatio() {
+    const progressControl = sceneVideoPlayerElement()?.querySelector(".vjs-progress-control");
+    const played = progressControl?.querySelector(".vjs-play-progress");
+    if (!progressControl || !played || progressControl.offsetWidth <= 0) return undefined;
+    if (played.offsetWidth > 0) return clamp(played.offsetWidth / progressControl.offsetWidth, 0, 1);
+    const width = window.getComputedStyle?.(played)?.width;
+    if (!width?.endsWith?.("%")) return undefined;
+    return clamp(Number.parseFloat(width) / 100, 0, 1);
+  }
+
+  function showSeekFeedback(deltaSeconds, targetTime, duration) {
+    let feedback = document.querySelector(".folder-browser-mobile-seek-feedback");
+    if (!feedback) {
+      feedback = document.createElement("div");
+      feedback.className = "folder-browser-mobile-seek-feedback";
+    }
+    let label = feedback.querySelector(".folder-browser-mobile-seek-label");
+    let track = feedback.querySelector(".folder-browser-mobile-seek-track");
+    let fill = feedback.querySelector(".folder-browser-mobile-seek-fill");
+    if (!label || !track || !fill) {
+      feedback.textContent = "";
+      label = document.createElement("div");
+      label.className = "folder-browser-mobile-seek-label";
+      track = document.createElement("div");
+      track.className = "folder-browser-mobile-seek-track";
+      fill = document.createElement("div");
+      fill.className = "folder-browser-mobile-seek-fill";
+      track.appendChild(fill);
+      feedback.append(label, track);
+    }
+    const feedbackHost = scenePlayerContainer() || document.body;
+    if (feedbackHost && feedback.parentElement !== feedbackHost) {
+      feedbackHost.appendChild(feedback);
+    }
+    syncSeekFeedbackBounds(feedback, feedbackHost);
+    label.textContent = formatSeekDelta(deltaSeconds);
+    const hasProgress = Number.isFinite(targetTime) && Number.isFinite(duration) && duration > 0;
+    feedback.classList.add("has-progress");
+    if (hasProgress) {
+      fill.style.width = `${clamp(targetTime / duration, 0, 1) * 100}%`;
+    } else {
+      fill.style.width = `${(nativeProgressRatio() || 0) * 100}%`;
+    }
+    feedback.classList.add("visible");
+    window.clearTimeout(seekFeedbackTimer);
+    seekFeedbackTimer = window.setTimeout(() => feedback.classList.remove("visible"), 850);
+  }
+
+  function seekSceneVideo(deltaSeconds) {
+    const video = sceneVideoElement();
+    if (!video || !Number.isFinite(video.duration)) return;
+    const targetTime = clamp((video.currentTime || 0) + deltaSeconds, 0, video.duration || Number.MAX_SAFE_INTEGER);
+    video.currentTime = targetTime;
+    showSeekFeedback(deltaSeconds);
+  }
+
+  function setMobilePlayerChromeState(state) {
+    const body = document.body;
+    body?.classList.toggle("folder-browser-player-chrome-visible", state === "visible");
+    body?.classList.toggle("folder-browser-player-chrome-fading", state === "fading");
+    body?.classList.toggle("folder-browser-player-chrome-hidden", state === "hidden");
+  }
+
+  function setMobilePlayerChromeVisible(visible) {
+    setMobilePlayerChromeState(visible ? "visible" : "hidden");
+  }
+
+  function startMobilePlayerChromeFade() {
+    const remaining = mobileChromeHoldUntil - Date.now();
+    if (remaining > 0) {
+      window.clearTimeout(mobileChromeTimer);
+      mobileChromeTimer = window.setTimeout(startMobilePlayerChromeFade, remaining);
+      return;
+    }
+    setMobilePlayerChromeState("fading");
+    window.clearTimeout(mobileChromeFadeTimer);
+    mobileChromeFadeTimer = window.setTimeout(() => {
+      setMobilePlayerChromeVisible(false);
+    }, MOBILE_PLAYER_CHROME_FADE_MS);
+  }
+
+  function syncMobilePlayerChromeFromVideo() {
+    if (!isScenePath() || !mobileLayoutNow()) return false;
+    const player = sceneVideoPlayerElement();
+    if (!player) return false;
+    const isActive = player.classList.contains("vjs-user-active");
+    const isInactive = player.classList.contains("vjs-user-inactive");
+    if (isActive) showMobilePlayerChrome();
+    if (isInactive) startMobilePlayerChromeFade();
+    return isActive || isInactive;
+  }
+
+  function observeMobilePlayerChrome(container) {
+    const player = container?.querySelector?.(".video-js") || sceneVideoPlayerElement();
+    if (mobileChromeObservedPlayer === player) {
+      syncMobilePlayerChromeFromVideo();
+      return;
+    }
+    mobileChromeObserver?.disconnect?.();
+    mobileChromeObservedPlayer = player || null;
+    if (!player) return;
+    mobileChromeObserver = new MutationObserver(syncMobilePlayerChromeFromVideo);
+    mobileChromeObserver.observe(player, { attributes: true, attributeFilter: ["class"] });
+    syncMobilePlayerChromeFromVideo();
+  }
+
+  function showMobilePlayerChrome(duration = MOBILE_PLAYER_CHROME_HOLD_MS) {
+    mobileChromeHoldUntil = Date.now() + duration;
+    setMobilePlayerChromeVisible(true);
+    window.clearTimeout(mobileChromeTimer);
+    window.clearTimeout(mobileChromeFadeTimer);
+    mobileChromeTimer = window.setTimeout(startMobilePlayerChromeFade, duration);
+  }
+
+  function sourceQualityLabel(selector) {
+    const selected =
+      selector.querySelector(".vjs-source-menu-item.vjs-selected") ||
+      selector.querySelector(".vjs-menu-item.vjs-selected") ||
+      selector.querySelector("[aria-checked='true']");
+    const text = selected?.textContent
+      ?.replace(/\bselected\b/gi, "")
+      .replace(/\s+/g, " ")
+      .replace(/^[\s,，]+|[\s,，]+$/g, "")
+      .trim();
+    return text || "";
+  }
+
+  function syncMobileSourceQualityLabels(container = scenePlayerContainer()) {
+    if (!container || !isScenePath() || !mobileLayoutNow()) return;
+    container.querySelectorAll(".vjs-source-selector").forEach((selector) => {
+      const label = sourceQualityLabel(selector);
+      const placeholders = selector.querySelectorAll(".vjs-icon-placeholder, .vjs-icon-cog");
+      selector.classList.toggle("folder-browser-has-quality-placeholder", Boolean(label && placeholders.length));
+      if (label) {
+        selector.setAttribute("data-folder-browser-quality-label", label);
+        placeholders.forEach((placeholder) => {
+          placeholder.setAttribute("data-folder-browser-quality-label", label);
+        });
+      } else {
+        selector.removeAttribute("data-folder-browser-quality-label");
+        placeholders.forEach((placeholder) => {
+          placeholder.removeAttribute("data-folder-browser-quality-label");
+        });
+      }
+    });
+  }
+
+  function observeMobileSourceQualityLabels(container) {
+    if (mobileSourceQualityObservedContainer === container) {
+      syncMobileSourceQualityLabels(container);
+      return;
+    }
+    mobileSourceQualityObserver?.disconnect?.();
+    mobileSourceQualityObservedContainer = container || null;
+    if (!container) return;
+    mobileSourceQualityObserver = new MutationObserver(() => syncMobileSourceQualityLabels(container));
+    mobileSourceQualityObserver.observe(container, {
+      attributes: true,
+      attributeFilter: ["class", "aria-checked"],
+      childList: true,
+      subtree: true,
+    });
+    syncMobileSourceQualityLabels(container);
+  }
+
+  function sourceQualityMenuIsOpen(selector) {
+    return Boolean(
+      selector.classList.contains("vjs-hover") ||
+        selector.classList.contains("vjs-lock-showing") ||
+        selector.getAttribute("aria-expanded") === "true" ||
+        selector.querySelector(".vjs-hover, .vjs-lock-showing, [aria-expanded='true']")
+    );
+  }
+
+  function closeMobileSourceQualityMenus(target) {
+    let closed = false;
+    document.querySelectorAll(".vjs-source-selector").forEach((selector) => {
+      if (target?.closest?.(".vjs-source-selector") === selector) return;
+      if (!sourceQualityMenuIsOpen(selector)) return;
+      closed = true;
+      selector.classList.remove("vjs-hover", "vjs-lock-showing");
+      selector.setAttribute("aria-expanded", "false");
+      selector.querySelectorAll(".vjs-hover, .vjs-lock-showing").forEach((element) => {
+        element.classList.remove("vjs-hover", "vjs-lock-showing");
+      });
+      selector.querySelectorAll("[aria-expanded='true']").forEach((element) => {
+        element.setAttribute("aria-expanded", "false");
+      });
+      if (selector.contains(document.activeElement)) {
+        document.activeElement?.blur?.();
+      }
+    });
+    return closed;
+  }
+
+  function setupMobileSourceMenuOutsideClose() {
+    if (mobileSourceMenuOutsideCloseSetup) return;
+    mobileSourceMenuOutsideCloseSetup = true;
+    const closeOnOutsidePress = (event) => {
+      if (!isScenePath() || !mobileLayoutNow()) return;
+      if (!closeMobileSourceQualityMenus(event.target)) return;
+      stopMobilePlayerEvent(event);
+      suppressMobilePlayerClick = true;
+      window.setTimeout(() => {
+        suppressMobilePlayerClick = false;
+      }, 260);
+    };
+
+    document.addEventListener("touchstart", closeOnOutsidePress, { capture: true, passive: false });
+    document.addEventListener("mousedown", closeOnOutsidePress, true);
+    document.addEventListener("click", closeOnOutsidePress, true);
+  }
+
+  function clearMobilePlayerMode() {
+    window.clearTimeout(mobileChromeTimer);
+    window.clearTimeout(mobileChromeFadeTimer);
+    mobileChromeHoldUntil = 0;
+    document.body?.classList.remove(
+      "folder-browser-player-immersive",
+      "folder-browser-player-landscape",
+      "folder-browser-player-portrait",
+      "folder-browser-player-chrome-visible",
+      "folder-browser-player-chrome-hidden",
+      "folder-browser-player-chrome-fading"
+    );
+    screen.orientation?.unlock?.();
+    window.clearTimeout(mobileSingleTapTimer);
+    syncMobilePlayerControlsState();
+  }
+
+  function enterMobilePlayerMode(orientation) {
+    if (!mobileLayoutNow()) return;
+    const mode = orientation || activeSceneVideoOrientation();
+    document.body?.classList.add("folder-browser-player-immersive");
+    document.body?.classList.toggle("folder-browser-player-landscape", mode === "landscape");
+    document.body?.classList.toggle("folder-browser-player-portrait", mode !== "landscape");
+    if (mode === "landscape") {
+      document.body?.classList.remove("folder-browser-scene-details-open");
+    }
+    screen.orientation?.lock?.(mode).catch?.(() => {});
+    syncMobilePlayerControlsState();
+    showMobilePlayerChrome();
+  }
+
+  function syncMobilePlayerControlsState() {
+    const orientationToggle = mobilePlayerLayer?.querySelector("[data-folder-browser-orientation-toggle='1']");
+    const detailsToggle = mobilePlayerLayer?.querySelector("[data-folder-browser-details-toggle='1']");
+    const isLandscape = Boolean(document.body?.classList.contains("folder-browser-player-landscape"));
+    if (orientationToggle) {
+      orientationToggle.textContent = isLandscape ? "竖屏" : "横屏";
+      orientationToggle.title = isLandscape ? "竖屏播放" : "横屏播放";
+    }
+    if (detailsToggle) {
+      detailsToggle.hidden = isLandscape;
+    }
+  }
+
+  function toggleMobilePlayerOrientation() {
+    if (document.body?.classList.contains("folder-browser-player-landscape")) {
+      enterMobilePlayerMode("portrait");
+      return;
+    }
+    enterMobilePlayerMode("landscape");
+  }
+
+  function toggleSceneVideoPlayback() {
+    if (
+      document.body?.classList.contains("folder-browser-scene-details-open") &&
+      !document.body?.classList.contains("folder-browser-player-landscape")
+    ) {
+      document.body.classList.remove("folder-browser-scene-details-open");
+      showMobilePlayerChrome();
+      return;
+    }
+    const video = sceneVideoElement();
+    if (!video) return;
+    showMobilePlayerChrome();
+    if (video.paused) {
+      video.play?.().catch?.(() => {});
+    } else {
+      video.pause?.();
+    }
+  }
+
+  function scheduleMobilePlayerSingleTap() {
+    window.clearTimeout(mobileSingleTapTimer);
+    showMobilePlayerChrome();
+    mobileSingleTapTimer = window.setTimeout(toggleSceneVideoPlayback, MOBILE_PLAYER_DOUBLE_TAP_MS);
+  }
+
+  function isMobilePlayerDoubleTap(touch) {
+    if (!touch) return false;
+    const now = Date.now();
+    const tap = { time: now, x: touch.clientX, y: touch.clientY };
+    const previous = lastMobilePlayerTap;
+    lastMobilePlayerTap = tap;
+    if (!previous || now - previous.time > MOBILE_PLAYER_DOUBLE_TAP_MS) return false;
+    const distance = Math.hypot(tap.x - previous.x, tap.y - previous.y);
+    return distance <= MOBILE_PLAYER_DOUBLE_TAP_PX;
+  }
+
+  function isNearLastMobilePlayerTap(touch) {
+    if (!touch || !lastMobilePlayerTap) return false;
+    if (Date.now() - lastMobilePlayerTap.time > MOBILE_PLAYER_DOUBLE_TAP_MS) return false;
+    return Math.hypot(touch.clientX - lastMobilePlayerTap.x, touch.clientY - lastMobilePlayerTap.y) <=
+      MOBILE_PLAYER_DOUBLE_TAP_PX;
+  }
+
+  function stopMobilePlayerEvent(event) {
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+  }
+
+  function shouldIgnorePlayerGesture(target) {
+    return Boolean(
+      target.closest?.(
+        "button,a,input,select,textarea,.scrubber-wrapper,.vjs-control-bar,.folder-browser-mobile-player-controls"
+      )
+    );
+  }
+
+  function effectiveVideoDuration(video) {
+    if (Number.isFinite(video?.duration) && video.duration > 0) return video.duration;
+    const seekable = video?.seekable;
+    if (!seekable?.length) return undefined;
+    for (let index = seekable.length - 1; index >= 0; index -= 1) {
+      try {
+        const end = seekable.end(index);
+        if (Number.isFinite(end) && end > 0) return end;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  function adaptiveMobileScrubDelta(gesture, axis, video, landscape) {
+    const duration = effectiveVideoDuration(video) || 0;
+    const axisSize = landscape
+      ? Math.max(window.innerWidth || 0, window.innerHeight || 0, 320)
+      : Math.max(window.innerWidth || 0, 320);
+    const fallbackSpan = 120;
+    const baseSpan = duration ? clamp(duration * 0.12, 30, 420) : fallbackSpan;
+    const velocity = Math.max(gesture.velocity || 0, Math.abs(axis) / Math.max(Date.now() - gesture.startedAt, 80));
+    const speedFactor = clamp(0.62 + velocity * 2.15, 0.55, 3.2);
+    const rawDelta = (axis / axisSize) * baseSpan * speedFactor;
+    const limit = duration ? duration : 900;
+    return clamp(rawDelta, -limit, limit);
+  }
+
+  function setupMobilePlayerGestures(container) {
+    if (container.dataset.folderBrowserGestures === "1") return;
+    container.dataset.folderBrowserGestures = "1";
+
+    container.addEventListener(
+      "touchstart",
+      (event) => {
+        if (!isScenePath() || !mobileLayoutNow() || event.touches.length !== 1 || shouldIgnorePlayerGesture(event.target)) {
+          mobileGesture = null;
+          return;
+        }
+        const touch = event.touches[0];
+        const video = sceneVideoElement();
+        const doubleTapCandidate = isNearLastMobilePlayerTap(touch);
+        if (doubleTapCandidate) {
+          stopMobilePlayerEvent(event);
+        }
+        mobileGesture = {
+          startX: touch.clientX,
+          startY: touch.clientY,
+          startTime: video?.currentTime || 0,
+          delta: 0,
+          doubleTapCandidate,
+          lastAxis: 0,
+          lastMoveTime: Date.now(),
+          seeking: false,
+          startedAt: Date.now(),
+          targetTime: video?.currentTime || 0,
+          velocity: 0,
+        };
+      },
+      { passive: false, capture: true }
+    );
+
+    container.addEventListener(
+      "touchmove",
+      (event) => {
+        if (!mobileGesture || event.touches.length !== 1) return;
+        const touch = event.touches[0];
+        const dx = touch.clientX - mobileGesture.startX;
+        const dy = touch.clientY - mobileGesture.startY;
+        const landscape = Boolean(document.body?.classList.contains("folder-browser-player-landscape"));
+        const seekAxis = landscape ? dy : dx;
+        const crossAxis = landscape ? dx : dy;
+        if (!mobileGesture.seeking && (Math.abs(seekAxis) < 22 || Math.abs(seekAxis) < Math.abs(crossAxis) * 1.35)) return;
+        mobileGesture.seeking = true;
+        container.classList.add("folder-browser-gesturing");
+        event.preventDefault();
+        const now = Date.now();
+        const elapsed = Math.max(now - mobileGesture.lastMoveTime, 16);
+        const instantVelocity = Math.abs(seekAxis - mobileGesture.lastAxis) / elapsed;
+        mobileGesture.velocity = mobileGesture.velocity ? mobileGesture.velocity * 0.72 + instantVelocity * 0.28 : instantVelocity;
+        mobileGesture.lastAxis = seekAxis;
+        mobileGesture.lastMoveTime = now;
+        const video = sceneVideoElement();
+        const realDuration = effectiveVideoDuration(video);
+        const delta = adaptiveMobileScrubDelta(mobileGesture, seekAxis, video, landscape);
+        const targetTime = clamp(mobileGesture.startTime + delta, 0, realDuration || Number.MAX_SAFE_INTEGER);
+        mobileGesture.targetTime = targetTime;
+        mobileGesture.delta = targetTime - mobileGesture.startTime;
+        showSeekFeedback(mobileGesture.delta, targetTime, realDuration);
+      },
+      { passive: false, capture: true }
+    );
+
+    container.addEventListener(
+      "touchend",
+      (event) => {
+        const shouldShowChrome = mobileGesture && !mobileGesture.seeking;
+        if (mobileGesture?.seeking) {
+          lastMobilePlayerTap = null;
+          window.clearTimeout(mobileSingleTapTimer);
+          const video = sceneVideoElement();
+          const realDuration = effectiveVideoDuration(video);
+          const targetTime = clamp(mobileGesture.targetTime, 0, realDuration || Number.MAX_SAFE_INTEGER);
+          if (video) video.currentTime = targetTime;
+          showSeekFeedback(targetTime - mobileGesture.startTime, targetTime, realDuration);
+          suppressMobilePlayerClick = true;
+          window.setTimeout(() => {
+            suppressMobilePlayerClick = false;
+          }, 320);
+        }
+        if (shouldShowChrome) {
+          if (mobileGesture.doubleTapCandidate || isMobilePlayerDoubleTap(event.changedTouches?.[0])) {
+            lastMobilePlayerTap = null;
+            window.clearTimeout(mobileSingleTapTimer);
+            stopMobilePlayerEvent(event);
+            toggleMobilePlayerOrientation();
+            suppressMobilePlayerClick = true;
+            window.setTimeout(() => {
+              suppressMobilePlayerClick = false;
+            }, 320);
+          } else {
+            stopMobilePlayerEvent(event);
+            scheduleMobilePlayerSingleTap();
+            suppressMobilePlayerClick = true;
+            window.setTimeout(() => {
+              suppressMobilePlayerClick = false;
+            }, MOBILE_PLAYER_DOUBLE_TAP_MS + 60);
+          }
+        }
+        container.classList.remove("folder-browser-gesturing");
+        mobileGesture = null;
+      },
+      { passive: false, capture: true }
+    );
+
+    container.addEventListener("click", (event) => {
+      if (suppressMobilePlayerClick) {
+        stopMobilePlayerEvent(event);
+        return;
+      }
+      if (!isScenePath() || !mobileLayoutNow() || shouldIgnorePlayerGesture(event.target)) return;
+      stopMobilePlayerEvent(event);
+      scheduleMobilePlayerSingleTap();
+    }, { capture: true });
+
+    container.addEventListener("dblclick", (event) => {
+      if (!isScenePath() || !mobileLayoutNow() || shouldIgnorePlayerGesture(event.target)) return;
+      stopMobilePlayerEvent(event);
+      window.clearTimeout(mobileSingleTapTimer);
+      if (suppressMobilePlayerClick) return;
+      toggleMobilePlayerOrientation();
+      suppressMobilePlayerClick = true;
+      window.setTimeout(() => {
+        suppressMobilePlayerClick = false;
+      }, 320);
+    }, { capture: true });
+  }
+
+  function removeMobilePlayerLayer() {
+    if (mobilePlayerLayer?.parentElement) {
+      mobilePlayerLayer.parentElement.removeChild(mobilePlayerLayer);
+    }
+    mobilePlayerLayer = null;
+    mobileChromeObserver?.disconnect?.();
+    mobileChromeObserver = null;
+    mobileChromeObservedPlayer = null;
+    mobileSourceQualityObserver?.disconnect?.();
+    mobileSourceQualityObserver = null;
+    mobileSourceQualityObservedContainer = null;
+    clearMobilePlayerMode();
+  }
+
+  function syncMobilePlayerLayer() {
+    if (!isScenePath() || !mobileLayoutNow()) {
+      removeMobilePlayerLayer();
+      return;
+    }
+
+    const container = scenePlayerContainer();
+    if (!container) return;
+    setupMobilePlayerGestures(container);
+
+    if (mobilePlayerLayer?.parentElement === container) {
+      observeMobilePlayerChrome(container);
+      observeMobileSourceQualityLabels(container);
+      return;
+    }
+    removeMobilePlayerLayer();
+
+    mobilePlayerLayer = document.createElement("div");
+    mobilePlayerLayer.className = "folder-browser-mobile-player-controls";
+
+    const back = document.createElement("a");
+    back.className = "folder-browser-mobile-player-button";
+    back.href = folderBrowserRouteHref();
+    back.textContent = "返回";
+    back.title = "返回文件夹";
+
+    const landscape = document.createElement("button");
+    landscape.className = "folder-browser-mobile-player-button";
+    landscape.type = "button";
+    landscape.dataset.folderBrowserOrientationToggle = "1";
+    landscape.textContent = "横屏";
+    landscape.title = "横屏播放";
+    landscape.addEventListener("click", toggleMobilePlayerOrientation);
+
+    const details = document.createElement("button");
+    details.className = "folder-browser-mobile-player-button";
+    details.type = "button";
+    details.dataset.folderBrowserDetailsToggle = "1";
+    details.textContent = "详情";
+    details.title = "显示/隐藏视频详情";
+    details.addEventListener("click", () => {
+      document.body?.classList.toggle("folder-browser-scene-details-open");
+      showMobilePlayerChrome();
+    });
+
+    mobilePlayerLayer.append(back, landscape, details);
+    container.appendChild(mobilePlayerLayer);
+    syncMobilePlayerControlsState();
+    observeMobilePlayerChrome(container);
+    observeMobileSourceQualityLabels(container);
+  }
+
+  function setupMobilePlayerLayer() {
+    setupMobileSourceMenuOutsideClose();
+    const sync = () => window.setTimeout(syncMobilePlayerLayer, 0);
+    const observer = new MutationObserver(syncMobilePlayerLayer);
 
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true });
@@ -3043,7 +3697,7 @@
   setupFolderBrowserRouteClass();
   setupFolderBrowserHomeRedirect();
   setupPlayerReturnButton();
-  setupMobileSceneDetailsMenu();
+  setupMobilePlayerLayer();
   setupMobileFullscreenOrientation();
 
   api.patch.before("MainNavBar.MenuItems", function (props) {

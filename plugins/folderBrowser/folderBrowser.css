@@ -521,6 +521,11 @@
   display: none;
 }
 
+.folder-browser-mobile-player-controls,
+.folder-browser-mobile-seek-feedback {
+  display: none;
+}
+
 .folder-browser-sections {
   display: flex;
   flex-direction: column;
@@ -1060,8 +1065,13 @@
 
 @media (max-width: 900px) {
   body.folder-browser-scene-route {
+    background: #000 !important;
     overflow-x: hidden;
-    padding: 3rem 0 0 0 !important;
+    padding: 0 !important;
+  }
+
+  body.folder-browser-scene-route .top-nav {
+    display: none !important;
   }
 
   body.folder-browser-scene-route:not(.folder-browser-scene-details-open) .scene-tabs {
@@ -1085,18 +1095,28 @@
 
   body.folder-browser-scene-route .scene-player-container {
     align-items: center;
+    background: #000;
     display: flex;
     justify-content: center;
-    min-height: calc(100dvh - 3rem);
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
     padding-left: 0;
     padding-right: 0;
+    position: relative;
+    transform: none;
     width: 100vw;
+  }
+
+  body.folder-browser-scene-route .scene-player-container.folder-browser-gesturing {
+    touch-action: none;
   }
 
   body.folder-browser-scene-route .VideoPlayer {
     justify-content: center;
     max-height: none;
-    min-height: calc(100dvh - 3rem);
+    min-height: 100vh;
+    min-height: 100dvh;
     width: 100vw;
   }
 
@@ -1117,8 +1137,393 @@
     height: min(150vw, calc(100dvh - 5rem));
   }
 
+  body.folder-browser-scene-route .video-wrapper {
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: none !important;
+  }
+
+  body.folder-browser-scene-route .video-js {
+    bottom: 0 !important;
+    height: 100% !important;
+    left: 0 !important;
+    max-height: none !important;
+    max-width: none !important;
+    min-height: 100% !important;
+    padding: 0 !important;
+    position: relative !important;
+    right: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+  }
+
+  body.folder-browser-scene-route .video-js.vjs-fluid {
+    padding-top: 0 !important;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-tech {
+    height: 100% !important;
+    object-fit: contain !important;
+    width: 100% !important;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-control-bar {
+    border-radius: 0.35rem;
+    bottom: calc(0.7rem + env(safe-area-inset-bottom)) !important;
+    left: calc(0.55rem + env(safe-area-inset-left)) !important;
+    overflow: visible;
+    right: calc(0.55rem + env(safe-area-inset-right)) !important;
+    width: auto !important;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-fullscreen-control,
+  body.folder-browser-scene-route .video-js .vjs-playback-rate {
+    display: none !important;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-source-selector {
+    align-items: center;
+    display: inline-flex !important;
+    flex: 0 0 auto;
+    justify-content: center;
+    line-height: 1 !important;
+    margin-right: 0.85rem !important;
+    min-width: 6.9em !important;
+    padding: 0 0.55rem !important;
+    width: auto !important;
+  }
+
+  body.folder-browser-scene-route
+    .video-js
+    .vjs-source-selector.folder-browser-has-quality-placeholder[data-folder-browser-quality-label]::before {
+    content: "" !important;
+    display: none !important;
+  }
+
+  body.folder-browser-scene-route
+    .video-js
+    .vjs-source-selector:not(.folder-browser-has-quality-placeholder)[data-folder-browser-quality-label]::before {
+    color: rgba(255, 255, 255, 0.88);
+    content: attr(data-folder-browser-quality-label);
+    display: inline-flex;
+    font-size: 0.72rem;
+    font-weight: 600;
+    justify-content: center;
+    line-height: 1;
+    margin-right: 0;
+    max-width: 6.5rem;
+    min-width: 0;
+    overflow: hidden;
+    pointer-events: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-source-selector .vjs-icon-placeholder,
+  body.folder-browser-scene-route .video-js .vjs-source-selector .vjs-icon-cog {
+    align-items: center;
+    display: inline-flex !important;
+    height: 100%;
+    justify-content: center;
+    line-height: 1 !important;
+    margin: 0 !important;
+    min-width: 6.1rem;
+    pointer-events: none;
+    position: static !important;
+    transform: none !important;
+    width: auto !important;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-source-selector .vjs-icon-placeholder::before,
+  body.folder-browser-scene-route .video-js .vjs-source-selector .vjs-icon-cog::before {
+    align-items: center;
+    color: rgba(255, 255, 255, 0.88);
+    content: attr(data-folder-browser-quality-label) !important;
+    display: inline-flex !important;
+    font-family: inherit !important;
+    font-size: 0.72rem;
+    font-weight: 600;
+    height: 100%;
+    justify-content: center;
+    left: auto !important;
+    line-height: 1 !important;
+    max-width: 6.5rem;
+    overflow: hidden;
+    position: static !important;
+    text-overflow: ellipsis;
+    top: auto !important;
+    transform: none !important;
+    white-space: nowrap;
+    width: auto !important;
+  }
+
+  body.folder-browser-scene-route .video-js .vjs-source-selector .vjs-menu {
+    left: auto !important;
+    right: 0 !important;
+  }
+
   body.folder-browser-scene-route .scrubber-wrapper {
+    -webkit-overflow-scrolling: touch;
+    background: rgba(0, 0, 0, 0.58);
+    border-radius: 0.35rem;
+    display: flex;
+    height: 3.35rem;
+    margin: 0.35rem 0.45rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem;
+  }
+
+  .folder-browser-mobile-player-controls {
+    display: flex;
+    gap: 0.35rem;
+    left: calc(0.55rem + env(safe-area-inset-left));
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    right: calc(0.55rem + env(safe-area-inset-right));
+    top: calc(0.55rem + env(safe-area-inset-top));
+    transition: visibility 0.1s, opacity 0.1s;
+    visibility: hidden;
+    z-index: 90;
+  }
+
+  body.folder-browser-scene-route.folder-browser-player-chrome-visible .folder-browser-mobile-player-controls,
+  body.folder-browser-scene-route:not(.folder-browser-player-immersive) .folder-browser-mobile-player-controls {
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
+  }
+
+  body.folder-browser-scene-route.folder-browser-player-immersive.folder-browser-player-chrome-fading
+    .folder-browser-mobile-player-controls {
+    opacity: 0;
+    pointer-events: auto;
+    transition: visibility 1s, opacity 1s;
+    visibility: visible;
+  }
+
+  body.folder-browser-scene-route.folder-browser-player-immersive.folder-browser-player-chrome-hidden
+    .folder-browser-mobile-player-controls {
+    opacity: 0;
+    pointer-events: none;
+    transition: visibility 1s, opacity 1s;
+    visibility: hidden;
+  }
+
+  .folder-browser-mobile-player-button {
+    align-items: center;
+    background: rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 0.3rem;
+    color: #fff;
+    display: inline-flex;
+    font-size: 0.86rem;
+    font-weight: 600;
+    justify-content: center;
+    line-height: 1;
+    min-height: 2.35rem;
+    padding: 0.45rem 0.62rem;
+    text-decoration: none;
+  }
+
+  .folder-browser-mobile-player-button:hover,
+  .folder-browser-mobile-player-button:focus {
+    background: rgba(0, 0, 0, 0.82);
+    color: #fff;
+    text-decoration: none;
+  }
+
+  body.folder-browser-player-landscape .scene-tabs,
+  body.folder-browser-player-landscape [data-folder-browser-details-toggle="1"],
+  body.folder-browser-player-landscape .folder-browser-scene-details-toggle {
+    display: none !important;
+  }
+
+  .folder-browser-mobile-seek-feedback {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    bottom: calc(3.75rem + env(safe-area-inset-bottom));
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    font-size: 0.96rem;
+    font-weight: 700;
+    gap: 0.42rem;
+    justify-content: center;
+    left: var(--folder-browser-seek-left, 50%);
+    min-width: 0;
+    opacity: 0;
+    padding: 0;
+    pointer-events: none;
+    position: absolute;
+    right: auto;
+    transform: var(--folder-browser-seek-transform, translateX(-50%));
+    transition: opacity 120ms ease;
+    width: var(--folder-browser-seek-width, min(48vw, 16.5rem));
+    z-index: 95;
+  }
+
+  .folder-browser-mobile-seek-feedback.visible {
+    opacity: 1;
+  }
+
+  .folder-browser-mobile-seek-label {
+    align-self: center;
+    background: rgba(0, 0, 0, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0.4rem;
+    line-height: 1;
+    min-width: 4.6rem;
+    padding: 0.42rem 0.62rem;
+    text-align: center;
+  }
+
+  .folder-browser-mobile-seek-track {
+    background: rgba(255, 255, 255, 0.24);
+    border-radius: 999px;
     display: none;
+    height: 0.34rem;
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .folder-browser-mobile-seek-feedback.has-progress .folder-browser-mobile-seek-track {
+    display: block;
+  }
+
+  .folder-browser-mobile-seek-fill {
+    background: #fff;
+    border-radius: inherit;
+    height: 100%;
+    transition: width 40ms linear;
+    width: 0%;
+  }
+
+  body.folder-browser-player-landscape .folder-browser-mobile-seek-feedback {
+    bottom: calc(3.35rem + env(safe-area-inset-bottom));
+    width: var(--folder-browser-seek-width, min(58vh, 22rem));
+  }
+
+  body.folder-browser-player-immersive {
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+
+  body.folder-browser-player-immersive .top-nav,
+  body.folder-browser-player-immersive .scene-tabs {
+    display: none !important;
+  }
+
+  body.folder-browser-player-immersive .scene-player-container {
+    background: #000;
+    bottom: 0;
+    height: 100vh;
+    height: 100dvh;
+    left: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 0;
+    position: fixed;
+    right: 0;
+    top: 0;
+    transform: none;
+    width: 100vw;
+    z-index: 5000;
+  }
+
+  body.folder-browser-player-immersive .VideoPlayer,
+  body.folder-browser-player-immersive .video-wrapper {
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    padding: 0;
+    width: 100vw !important;
+  }
+
+  body.folder-browser-player-immersive .scrubber-wrapper {
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    display: none;
+    left: 0.5rem;
+    margin: 0;
+    position: fixed;
+    right: 0.5rem;
+    z-index: 5900;
+  }
+
+  body.folder-browser-player-immersive.folder-browser-player-chrome-visible .scrubber-wrapper {
+    display: flex;
+  }
+
+  body.folder-browser-player-landscape .scene-player-container {
+    bottom: auto;
+    height: 100vw !important;
+    left: 50%;
+    min-height: 100vw !important;
+    overflow: visible;
+    right: auto;
+    top: 50%;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center center;
+    width: 100vh !important;
+    width: 100dvh !important;
+  }
+
+  body.folder-browser-player-landscape .VideoPlayer,
+  body.folder-browser-player-landscape .video-wrapper {
+    height: 100% !important;
+    max-height: none !important;
+    min-height: 100% !important;
+    position: relative !important;
+    transform: none;
+    width: 100% !important;
+  }
+
+  body.folder-browser-player-landscape .VideoPlayer {
+    display: block !important;
+  }
+
+  body.folder-browser-player-landscape .video-wrapper {
+    overflow: hidden !important;
+  }
+
+  body.folder-browser-player-landscape .video-js {
+    bottom: 0 !important;
+    height: 100% !important;
+    left: 0 !important;
+    max-height: none !important;
+    max-width: none !important;
+    min-height: 100% !important;
+    padding: 0 !important;
+    position: absolute !important;
+    right: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    width: 100% !important;
+  }
+
+  body.folder-browser-player-landscape .video-js.vjs-fluid {
+    padding-top: 0 !important;
+  }
+
+  body.folder-browser-player-landscape .video-js .vjs-tech,
+  body.folder-browser-player-landscape .video-js video,
+  body.folder-browser-player-landscape .video-wrapper video {
+    bottom: 0 !important;
+    height: 100% !important;
+    left: 0 !important;
+    max-height: none !important;
+    max-width: none !important;
+    object-fit: contain !important;
+    position: absolute !important;
+    right: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+    width: 100% !important;
   }
 
   .folder-browser-scene-details-toggle {
