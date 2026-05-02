@@ -1431,6 +1431,7 @@
   let mobileSpriteCues = [];
   let mobileSpriteButtons = [];
   let mobileSpriteUserScrollUntil = 0;
+  let mobileSpriteProgrammaticScrollUntil = 0;
   const mobileSpriteCueCache = new Map();
   const mobileSpriteImageSizeCache = new Map();
   let mobileGesture = null;
@@ -1820,9 +1821,14 @@
         mobileSpriteUserScrollUntil = Date.now() + MOBILE_PLAYER_CHROME_HOLD_MS;
         showMobilePlayerChrome(MOBILE_PLAYER_CHROME_HOLD_MS);
       };
+      const holdUserScrollChrome = () => {
+        if (Date.now() < mobileSpriteProgrammaticScrollUntil) return;
+        holdChrome();
+      };
       ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove", "pointerup", "wheel"].forEach((eventName) => {
         mobileSpriteStrip.addEventListener(eventName, holdChrome, { passive: true });
       });
+      mobileSpriteStrip.addEventListener("scroll", holdUserScrollChrome, { passive: true });
       mobileSpriteStrip.dataset.events = "1";
     }
     if (container && mobileSpriteStrip.parentElement !== container) {
@@ -1842,6 +1848,7 @@
     mobileSpriteCues = [];
     mobileSpriteButtons = [];
     mobileSpriteUserScrollUntil = 0;
+    mobileSpriteProgrammaticScrollUntil = 0;
     if (mobileSpriteStrip?.parentElement) {
       mobileSpriteStrip.parentElement.removeChild(mobileSpriteStrip);
     }
@@ -1869,6 +1876,7 @@
     const button = mobileSpriteButtons[index];
     if (!mobileSpriteStrip || !button || mobileSpriteStrip.clientWidth <= 0) return;
     const targetLeft = button.offsetLeft + button.offsetWidth / 2 - mobileSpriteStrip.clientWidth / 2;
+    mobileSpriteProgrammaticScrollUntil = Date.now() + 1200;
     mobileSpriteStrip.scrollTo({
       left: clamp(targetLeft, 0, Math.max(mobileSpriteStrip.scrollWidth - mobileSpriteStrip.clientWidth, 0)),
       behavior,
