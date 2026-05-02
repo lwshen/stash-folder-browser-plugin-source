@@ -11,6 +11,7 @@
   const ROUTE = "/folders";
   const PLUGIN_PACKAGE_ID = "folderBrowser";
   const STATE_KEY = "folderBrowser.state.v1";
+  const SCENE_PROGRESS_KEY_PREFIX = "folderBrowser.sceneProgress.v1";
   const SCENE_RETURN_PARAM = "folderBrowserReturn";
   const SCENE_PAGE_ROWS = 4;
   const IMAGE_PAGE_ROWS = 5;
@@ -1420,6 +1421,11 @@
   let mobileChromeHoldUntil = 0;
   let mobileChromeObserver = null;
   let mobileChromeObservedPlayer = null;
+  let mobileSceneProgressVideo = null;
+  let mobileSceneProgressSceneID = null;
+  let mobileSceneProgressLastSave = 0;
+  let mobileSceneProgressRestoredVideo = null;
+  let mobileSceneProgressRestoredKey = null;
   let mobileSourceQualityObserver = null;
   let mobileSourceQualityObservedContainer = null;
   let mobileSourceMenuOutsideCloseSetup = false;
@@ -1458,6 +1464,115 @@
   function currentSceneID() {
     const match = appRoutePath().match(/^\/scenes\/([^/?#]+)/);
     return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  function sceneProgressKey(sceneID = currentSceneID()) {
+    return sceneID ? `${SCENE_PROGRESS_KEY_PREFIX}.${sceneID}` : null;
+  }
+
+  function readSceneProgress(sceneID) {
+    const key = sceneProgressKey(sceneID);
+    if (!key) return null;
+    try {
+      const raw = window.sessionStorage?.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSceneProgress(sceneID, time, duration) {
+    const key = sceneProgressKey(sceneID);
+    if (!key || !Number.isFinite(time) || time < 1) return;
+    try {
+      window.sessionStorage?.setItem(key, JSON.stringify({ duration: duration || 0, time, updatedAt: Date.now() }));
+    } catch {
+      // Ignore storage failures; the video should keep playing normally.
+    }
+  }
+
+  function removeSceneProgress(sceneID) {
+    const key = sceneProgressKey(sceneID);
+    if (!key) return;
+    try {
+      window.sessionStorage?.removeItem(key);
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  function saveScenePlaybackProgress(video = sceneVideoElement(), sceneID = currentSceneID(), force = false) {
+    if (!video || !sceneID) return;
+    const now = Date.now();
+    if (!force && now - mobileSceneProgressLastSave < 900) return;
+    mobileSceneProgressLastSave = now;
+    const duration = effectiveVideoDuration(video);
+    if (duration && video.currentTime >= duration - 1.5) {
+      removeSceneProgress(sceneID);
+      return;
+    }
+    writeSceneProgress(sceneID, video.currentTime || 0, duration || 0);
+  }
+
+  function restoreScenePlaybackProgress(video, sceneID) {
+    const key = sceneProgressKey(sceneID);
+    if (!video || !key || (mobileSceneProgressRestoredVideo === video && mobileSceneProgressRestoredKey === key)) return;
+    const saved = readSceneProgress(sceneID);
+    const applyRestore = () => {
+      mobileSceneProgressRestoredVideo = video;
+      mobileSceneProgressRestoredKey = key;
+      if (!saved || !Number.isFinite(saved.time) || saved.time < 1.5) return;
+      const duration = effectiveVideoDuration(video);
+      if (duration && saved.time >= duration - 1.5) return;
+      if ((video.currentTime || 0) > 1) return;
+      video.currentTime = duration ? clamp(saved.time, 0, duration - 1.5) : saved.time;
+    };
+    if (video.readyState >= 1) {
+      applyRestore();
+    } else {
+      video.addEventListener("loadedmetadata", applyRestore, { once: true });
+    }
+  }
+
+  function handleSceneProgressSave(event) {
+    saveScenePlaybackProgress(event.currentTarget, mobileSceneProgressSceneID);
+  }
+
+  function handleSceneProgressEnded(event) {
+    removeSceneProgress(mobileSceneProgressSceneID);
+    saveScenePlaybackProgress(event.currentTarget, mobileSceneProgressSceneID, true);
+  }
+
+  function bindMobileSceneProgress() {
+    const video = sceneVideoElement();
+    const sceneID = currentSceneID();
+    if (!video || !sceneID) return;
+    if (mobileSceneProgressVideo === video && mobileSceneProgressSceneID === sceneID) {
+      restoreScenePlaybackProgress(video, sceneID);
+      return;
+    }
+    clearMobileSceneProgress();
+    mobileSceneProgressVideo = video;
+    mobileSceneProgressSceneID = sceneID;
+    mobileSceneProgressLastSave = 0;
+    video.addEventListener("timeupdate", handleSceneProgressSave);
+    video.addEventListener("pause", handleSceneProgressSave);
+    video.addEventListener("seeked", handleSceneProgressSave);
+    video.addEventListener("ended", handleSceneProgressEnded);
+    restoreScenePlaybackProgress(video, sceneID);
+  }
+
+  function clearMobileSceneProgress() {
+    if (mobileSceneProgressVideo && mobileSceneProgressSceneID) {
+      saveScenePlaybackProgress(mobileSceneProgressVideo, mobileSceneProgressSceneID, true);
+      mobileSceneProgressVideo.removeEventListener("timeupdate", handleSceneProgressSave);
+      mobileSceneProgressVideo.removeEventListener("pause", handleSceneProgressSave);
+      mobileSceneProgressVideo.removeEventListener("seeked", handleSceneProgressSave);
+      mobileSceneProgressVideo.removeEventListener("ended", handleSceneProgressEnded);
+    }
+    mobileSceneProgressVideo = null;
+    mobileSceneProgressSceneID = null;
+    mobileSceneProgressLastSave = 0;
   }
 
   function resolveAssetURL(path, base = window.location.href) {
@@ -2297,6 +2412,7 @@
     mobileSourceQualityObserver?.disconnect?.();
     mobileSourceQualityObserver = null;
     mobileSourceQualityObservedContainer = null;
+    clearMobileSceneProgress();
     clearMobileSpriteStrip();
     clearMobilePlayerMode();
   }
@@ -2310,6 +2426,7 @@
     const container = scenePlayerContainer();
     if (!container) return;
     setupMobilePlayerGestures(container);
+    bindMobileSceneProgress();
 
     if (mobilePlayerLayer?.parentElement === container) {
       observeMobilePlayerChrome(container);
@@ -2327,6 +2444,7 @@
     back.href = folderBrowserRouteHref();
     back.textContent = "返回";
     back.title = "返回文件夹";
+    back.addEventListener("click", () => saveScenePlaybackProgress(undefined, undefined, true));
 
     const landscape = document.createElement("button");
     landscape.className = "folder-browser-mobile-player-button";
