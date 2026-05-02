@@ -1895,8 +1895,11 @@
       if (!video) return;
       time = video.currentTime || 0;
     }
-    const shouldCenter = options.forceCenter || Date.now() > mobileSpriteUserScrollUntil;
-    setMobileSpriteActiveIndex(mobileSpriteIndexForTime(time), behavior, shouldCenter);
+    const nextIndex = mobileSpriteIndexForTime(time);
+    const isChangingIndex = nextIndex !== mobileSpriteActiveIndex;
+    const userBrowsingSprites = Date.now() <= mobileSpriteUserScrollUntil;
+    const shouldCenter = options.forceCenter || (isChangingIndex && !userBrowsingSprites);
+    setMobileSpriteActiveIndex(nextIndex, behavior, shouldCenter);
   }
 
   function bindMobileSpriteVideo() {
@@ -2178,9 +2181,15 @@
         const dx = touch.clientX - mobileGesture.startX;
         const dy = touch.clientY - mobileGesture.startY;
         const landscape = Boolean(document.body?.classList.contains("folder-browser-player-landscape"));
+        const edgeBackGesture =
+          !landscape && mobileGesture.startX < 28 && dx >= -4 && Math.abs(dy) < Math.max(56, Math.abs(dx) * 1.15);
+        if (edgeBackGesture) return;
         const seekAxis = landscape ? dy : dx;
         const crossAxis = landscape ? dx : dy;
-        if (!mobileGesture.seeking && (Math.abs(seekAxis) < 22 || Math.abs(seekAxis) < Math.abs(crossAxis) * 1.35)) return;
+        if (!mobileGesture.seeking && (Math.abs(seekAxis) < 22 || Math.abs(seekAxis) < Math.abs(crossAxis) * 1.35)) {
+          if (Math.abs(dx) > 8 || Math.abs(dy) > 8) event.preventDefault();
+          return;
+        }
         mobileGesture.seeking = true;
         container.classList.add("folder-browser-gesturing");
         event.preventDefault();
@@ -2333,6 +2342,7 @@
     mobilePlayerLayer.append(back, landscape, details);
     container.appendChild(mobilePlayerLayer);
     syncMobilePlayerControlsState();
+    showMobilePlayerChrome();
     observeMobilePlayerChrome(container);
     observeMobileSourceQualityLabels(container);
     syncMobileSpriteStrip(container);

@@ -1355,8 +1355,7 @@
     z-index: 90;
   }
 
-  body.folder-browser-scene-route.folder-browser-player-chrome-visible .folder-browser-mobile-player-controls,
-  body.folder-browser-scene-route:not(.folder-browser-player-immersive) .folder-browser-mobile-player-controls {
+  body.folder-browser-scene-route.folder-browser-player-chrome-visible .folder-browser-mobile-player-controls {
     opacity: 1;
     pointer-events: auto;
     visibility: visible;
