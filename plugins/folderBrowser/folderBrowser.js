@@ -2933,6 +2933,7 @@
     const contentRef = React.useRef(null);
     const stickyRef = React.useRef(null);
     const scrollAreaRef = React.useRef(null);
+    const mobileFolderTreeRef = React.useRef(null);
     const loadMoreRef = React.useRef(null);
     const [currentFolder, setCurrentFolder] = React.useState(savedState?.currentFolder ?? null);
     const [contentWidth, setContentWidth] = React.useState(0);
@@ -2994,6 +2995,17 @@
         setMobileControlsOpen(false);
       }
     }, [isMobileLayout]);
+
+    React.useEffect(() => {
+      if (!isMobileLayout || !mobileFoldersOpen) return undefined;
+      let frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => {
+          const activeRow = mobileFolderTreeRef.current?.querySelector?.(".folder-browser-tree-row.active");
+          activeRow?.scrollIntoView?.({ block: "center", inline: "nearest" });
+        });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }, [currentFolder?.id, folderTree, isMobileLayout, mobileFoldersOpen]);
 
     React.useEffect(() => {
       if (!contentRef.current) return undefined;
@@ -3917,7 +3929,7 @@
       }
     }
 
-    function renderSidebar(className, includeResizer) {
+    function renderSidebar(className, includeResizer, treeRef = null) {
       return React.createElement(
         "aside",
         { className },
@@ -3934,7 +3946,7 @@
         }),
         React.createElement(
           "div",
-          { className: "folder-browser-tree" },
+          { className: "folder-browser-tree", ref: treeRef },
           folderTree.map((folder) =>
             React.createElement(FolderTreeNode, {
               key: folder.id,
@@ -3986,7 +3998,7 @@
             React.Fragment,
             null,
             React.createElement("div", { className: "folder-browser-mobile-drawer-backdrop", onClick: () => setMobileFoldersOpen(false) }),
-            renderSidebar("folder-browser-sidebar folder-browser-mobile-drawer", false)
+            renderSidebar("folder-browser-sidebar folder-browser-mobile-drawer", false, mobileFolderTreeRef)
           )
         : null,
       React.createElement(
