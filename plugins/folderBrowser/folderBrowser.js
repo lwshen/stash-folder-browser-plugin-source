@@ -493,9 +493,40 @@
     return image.files?.[0];
   }
 
+  function fileFormat(file) {
+    const format = String(file?.format || "").toLowerCase();
+    if (format) return format;
+    const basename = String(file?.basename || file?.path || "").toLowerCase();
+    const match = /\.([a-z0-9]+)$/.exec(basename);
+    return match ? match[1] : "";
+  }
+
+  function isHEIFFile(file) {
+    return ["heic", "heif"].includes(fileFormat(file));
+  }
+
+  function canDisplayHEIFOriginal() {
+    const ua = window.navigator?.userAgent || "";
+    const vendor = window.navigator?.vendor || "";
+    const platform = window.navigator?.platform || "";
+    const isApplePlatform = /iPhone|iPad|iPod|Mac/.test(platform) || /iPhone|iPad|iPod/.test(ua);
+    const isWebKit = /AppleWebKit/i.test(ua);
+    const isChromium = /Chrome|CriOS|Chromium|Edg|OPR|FxiOS/i.test(ua);
+    return isApplePlatform && isWebKit && !isChromium && /Apple/i.test(vendor || "Apple");
+  }
+
+  function imageDisplayPath(image, file) {
+    const paths = image?.paths || {};
+    if (isHEIFFile(file) && !canDisplayHEIFOriginal()) {
+      return paths.preview || paths.thumbnail || paths.image;
+    }
+    return paths.image || paths.preview || paths.thumbnail;
+  }
+
   function imageItems(images) {
     return (images ?? []).map((image) => {
       const file = primaryImageFile(image);
+      const displayPath = imageDisplayPath(image, file);
       return {
         id: `image-${image.id}`,
         imageID: image.id,
@@ -508,7 +539,8 @@
         width: file?.width,
         height: file?.height,
         thumb: image.paths?.thumbnail || image.paths?.preview || image.paths?.image,
-        full: image.paths?.image || image.paths?.preview || image.paths?.thumbnail,
+        full: displayPath,
+        original: image.paths?.image || displayPath,
         href: `/images/${image.id}`,
         image,
       };

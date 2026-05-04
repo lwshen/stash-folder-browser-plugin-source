@@ -8,6 +8,7 @@ Adds a Stash UI page at `/folders` for folder-first browsing.
 - Shows scanned library root folders.
 - Opens folders and lists direct sub-folders.
 - Mixes scenes and images in one grid for the selected folder.
+- Displays scanned HEIC/HEIF images when the Stash backend supports them.
 - Opens media through the native Stash detail pages:
   - scenes -> `/scenes/:id`
   - images -> `/images/:id`

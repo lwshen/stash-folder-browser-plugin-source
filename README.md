@@ -27,6 +27,8 @@ It is especially useful when:
 - Adds a `Folders` entry to the Stash navigation menu.
 - Shows a folder tree with expandable nested folders.
 - Opens folders into a media wall of videos or images.
+- Displays HEIC/HEIF images when Stash has scanned them, using the original on
+  Apple browsers and generated previews elsewhere.
 - Supports including or excluding child folders.
 - Supports sorting, size presets, selection, move, rename, delete, and download
   actions for supported Stash media entries.
@@ -48,9 +50,9 @@ scanning, thumbnails, sprites, streaming, file metadata, and backend mutations.
 If Stash does not scan or generate a preview for a file format, the plugin
 cannot fully support that format by itself.
 
-Known backend-level items, such as HEIC/HEIF scanning, old AVI sprite
-generation robustness, full folder filesystem operations, and native offline
-iPhone caching, are outside this plugin's current scope.
+Backend-level items, such as media scanning, old AVI sprite generation
+robustness, full folder filesystem operations, and native offline iPhone
+caching, remain outside this plugin's scope.
 
 Use this source URL in Stash:
 
