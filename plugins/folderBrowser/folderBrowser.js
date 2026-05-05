@@ -278,6 +278,29 @@
     }
   `;
 
+  const MOBILE_SCENE_DETAILS_QUERY = `
+    query FolderBrowserMobileSceneDetails($id: ID!) {
+      findScene(id: $id) {
+        id
+        title
+        date
+        files {
+          id
+          path
+          basename
+          duration
+          width
+          height
+          size
+          frame_rate
+          bit_rate
+          video_codec
+          audio_codec
+        }
+      }
+    }
+  `;
+
   const IMAGES_QUERY = `
     query FolderBrowserImages(
       $folderCriterion: HierarchicalMultiCriterionInput!
@@ -505,7 +528,7 @@
   }
 
   function primarySceneFile(scene) {
-    return scene.files?.[0];
+    return scene?.files?.[0];
   }
 
   function primaryImageFile(image) {
@@ -1463,6 +1486,10 @@
   }
 
   let mobilePlayerLayer = null;
+  let mobileSceneDetailsPanel = null;
+  let mobileSceneDetailsContent = null;
+  let mobileSceneDetailsSceneID = null;
+  let mobileSceneDetailsRequestToken = 0;
   let seekFeedbackTimer = 0;
   let mobileChromeTimer = 0;
   let mobileChromeFadeTimer = 0;
@@ -2172,6 +2199,151 @@
       });
   }
 
+  function formatMobileBitrate(value) {
+    if (!value) return "";
+    const mbps = value / 1000000;
+    return `${mbps.toFixed(mbps >= 10 ? 1 : 2)} Mbps`;
+  }
+
+  function formatMobileFrameRate(value) {
+    if (!value) return "";
+    return `${Number(value).toFixed(value >= 60 ? 0 : 2).replace(/\.?0+$/, "")} fps`;
+  }
+
+  function compactMobileDetailValue(value) {
+    if (Array.isArray(value)) return value.filter(Boolean).join(" / ");
+    return value || "";
+  }
+
+  function mobileSceneDetailRow(label, value, options = {}) {
+    const compactValue = compactMobileDetailValue(value);
+    if (!compactValue) return null;
+    const row = document.createElement("div");
+    row.className = "folder-browser-mobile-scene-detail-row";
+    if (options.long) row.classList.add("long");
+    const labelNode = document.createElement("span");
+    labelNode.className = "folder-browser-mobile-scene-detail-label";
+    labelNode.textContent = label;
+    const valueNode = document.createElement("span");
+    valueNode.className = "folder-browser-mobile-scene-detail-value";
+    valueNode.textContent = compactValue;
+    row.append(labelNode, valueNode);
+    return row;
+  }
+
+  function renderMobileSceneDetails(scene) {
+    if (!mobileSceneDetailsContent) return;
+    mobileSceneDetailsContent.replaceChildren();
+    const file = primarySceneFile(scene);
+    if (!scene || !file) {
+      mobileSceneDetailsContent.textContent = "没有可用详情。";
+      return;
+    }
+
+    const resolution = file.width && file.height ? `${file.width} x ${file.height}` : "";
+    const videoLine = compactMobileDetailValue([file.video_codec, formatMobileBitrate(file.bit_rate)]);
+    const rows = [
+      mobileSceneDetailRow("标题", scene.title, { long: true }),
+      mobileSceneDetailRow("文件", file.basename || file.path, { long: true }),
+      mobileSceneDetailRow("时长", formatDuration(file.duration)),
+      mobileSceneDetailRow("画面", compactMobileDetailValue([resolution, formatMobileFrameRate(file.frame_rate)])),
+      mobileSceneDetailRow("大小", formatBytes(file.size)),
+      mobileSceneDetailRow("视频", videoLine),
+      mobileSceneDetailRow("音频", file.audio_codec),
+      mobileSceneDetailRow("日期", scene.date),
+      mobileSceneDetailRow("路径", file.path, { long: true }),
+    ].filter(Boolean);
+
+    if (!rows.length) {
+      mobileSceneDetailsContent.textContent = "没有可用详情。";
+      return;
+    }
+    mobileSceneDetailsContent.append(...rows);
+  }
+
+  function ensureMobileSceneDetailsPanel(container = scenePlayerContainer()) {
+    if (!container) return null;
+    if (mobileSceneDetailsPanel?.parentElement === container) return mobileSceneDetailsPanel;
+    if (mobileSceneDetailsPanel?.parentElement) {
+      mobileSceneDetailsPanel.parentElement.removeChild(mobileSceneDetailsPanel);
+    }
+
+    mobileSceneDetailsPanel = document.createElement("section");
+    mobileSceneDetailsPanel.className = "folder-browser-mobile-scene-details-panel";
+    mobileSceneDetailsPanel.hidden = true;
+
+    const header = document.createElement("div");
+    header.className = "folder-browser-mobile-scene-details-header";
+    const title = document.createElement("span");
+    title.textContent = "视频详情";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "收起";
+    close.addEventListener("click", () => setMobileSceneDetailsOpen(false));
+    header.append(title, close);
+
+    mobileSceneDetailsContent = document.createElement("div");
+    mobileSceneDetailsContent.className = "folder-browser-mobile-scene-details-content";
+    mobileSceneDetailsPanel.append(header, mobileSceneDetailsContent);
+    container.appendChild(mobileSceneDetailsPanel);
+    syncMobileSceneDetailsPanelState();
+    return mobileSceneDetailsPanel;
+  }
+
+  function loadMobileSceneDetails(sceneID = currentSceneID()) {
+    if (!sceneID || !mobileSceneDetailsContent) return;
+    if (mobileSceneDetailsSceneID === sceneID && mobileSceneDetailsContent.dataset.loaded === "1") return;
+    mobileSceneDetailsSceneID = sceneID;
+    mobileSceneDetailsContent.dataset.loaded = "0";
+    mobileSceneDetailsContent.textContent = "加载中...";
+    const token = (mobileSceneDetailsRequestToken += 1);
+    callGQL(MOBILE_SCENE_DETAILS_QUERY, { id: sceneID })
+      .then((data) => {
+        if (token !== mobileSceneDetailsRequestToken) return;
+        mobileSceneDetailsContent.dataset.loaded = "1";
+        renderMobileSceneDetails(data.findScene);
+      })
+      .catch((error) => {
+        if (token !== mobileSceneDetailsRequestToken) return;
+        console.warn("[Folder Browser] Failed to load mobile scene details", error);
+        mobileSceneDetailsContent.dataset.loaded = "1";
+        mobileSceneDetailsContent.textContent = "详情加载失败。";
+      });
+  }
+
+  function syncMobileSceneDetailsPanelState() {
+    const isOpen = Boolean(document.body?.classList.contains("folder-browser-scene-details-open"));
+    const isLandscape = Boolean(document.body?.classList.contains("folder-browser-player-landscape"));
+    if (mobileSceneDetailsPanel) {
+      mobileSceneDetailsPanel.hidden = !isOpen || isLandscape;
+    }
+    if (isOpen && !isLandscape) {
+      loadMobileSceneDetails();
+    }
+  }
+
+  function setMobileSceneDetailsOpen(open) {
+    document.body?.classList.toggle("folder-browser-scene-details-open", Boolean(open));
+    syncMobileSceneDetailsPanelState();
+    showMobilePlayerChrome();
+  }
+
+  function toggleMobileSceneDetailsPanel() {
+    const isOpen = Boolean(document.body?.classList.contains("folder-browser-scene-details-open"));
+    setMobileSceneDetailsOpen(!isOpen);
+  }
+
+  function clearMobileSceneDetailsPanel() {
+    if (mobileSceneDetailsPanel?.parentElement) {
+      mobileSceneDetailsPanel.parentElement.removeChild(mobileSceneDetailsPanel);
+    }
+    mobileSceneDetailsPanel = null;
+    mobileSceneDetailsContent = null;
+    mobileSceneDetailsSceneID = null;
+    mobileSceneDetailsRequestToken += 1;
+    document.body?.classList.remove("folder-browser-scene-details-open");
+  }
+
   function clearMobilePlayerMode() {
     window.clearTimeout(mobileChromeTimer);
     window.clearTimeout(mobileChromeFadeTimer);
@@ -2200,6 +2372,7 @@
     }
     screen.orientation?.lock?.(mode).catch?.(() => {});
     syncMobilePlayerControlsState();
+    syncMobileSceneDetailsPanelState();
     showMobilePlayerChrome();
   }
 
@@ -2214,6 +2387,10 @@
     if (detailsToggle) {
       detailsToggle.hidden = isLandscape;
     }
+    if (isLandscape) {
+      document.body?.classList.remove("folder-browser-scene-details-open");
+    }
+    syncMobileSceneDetailsPanelState();
   }
 
   function toggleMobilePlayerOrientation() {
@@ -2230,6 +2407,7 @@
       !document.body?.classList.contains("folder-browser-player-landscape")
     ) {
       document.body.classList.remove("folder-browser-scene-details-open");
+      syncMobileSceneDetailsPanelState();
       showMobilePlayerChrome();
       return;
     }
@@ -2278,7 +2456,7 @@
   function shouldIgnorePlayerGesture(target) {
     return Boolean(
       target.closest?.(
-        "button,a,input,select,textarea,.scrubber-wrapper,.vjs-control-bar,.folder-browser-mobile-player-controls,.folder-browser-mobile-sprite-strip"
+        "button,a,input,select,textarea,.scrubber-wrapper,.vjs-control-bar,.folder-browser-mobile-player-controls,.folder-browser-mobile-sprite-strip,.folder-browser-mobile-scene-details-panel"
       )
     );
   }
@@ -2491,6 +2669,7 @@
     mobileSourceQualityObservedContainer = null;
     clearMobileSceneProgress();
     clearMobileSpriteStrip();
+    clearMobileSceneDetailsPanel();
     clearMobilePlayerMode();
   }
 
@@ -2504,11 +2683,13 @@
     if (!container) return;
     setupMobilePlayerGestures(container);
     bindMobileSceneProgress();
+    ensureMobileSceneDetailsPanel(container);
 
     if (mobilePlayerLayer?.parentElement === container) {
       observeMobilePlayerChrome(container);
       observeMobileSourceQualityLabels(container);
       syncMobileSpriteStrip(container);
+      syncMobileSceneDetailsPanelState();
       return;
     }
     removeMobilePlayerLayer();
@@ -2538,12 +2719,12 @@
     details.textContent = "详情";
     details.title = "显示/隐藏视频详情";
     details.addEventListener("click", () => {
-      document.body?.classList.toggle("folder-browser-scene-details-open");
-      showMobilePlayerChrome();
+      toggleMobileSceneDetailsPanel();
     });
 
     mobilePlayerLayer.append(back, landscape, details);
     container.appendChild(mobilePlayerLayer);
+    ensureMobileSceneDetailsPanel(container);
     syncMobilePlayerControlsState();
     showMobilePlayerChrome();
     observeMobilePlayerChrome(container);

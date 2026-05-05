@@ -1099,23 +1099,8 @@ body.folder-browser-lightbox-open {
     display: none !important;
   }
 
-  body.folder-browser-scene-route:not(.folder-browser-scene-details-open) .scene-tabs {
-    display: none;
-  }
-
-  body.folder-browser-scene-route.folder-browser-scene-details-open .scene-tabs {
-    -webkit-overflow-scrolling: touch;
-    background: #1f232b;
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
-    bottom: 0;
-    display: block;
-    left: 0;
-    max-height: min(62vh, 34rem);
-    overflow: auto;
-    padding: 0.65rem;
-    position: fixed;
-    right: 0;
-    z-index: 1080;
+  body.folder-browser-scene-route .scene-tabs {
+    display: none !important;
   }
 
   body.folder-browser-scene-route .scene-player-container {
@@ -1377,7 +1362,82 @@ body.folder-browser-lightbox-open {
     top: calc(0.55rem + env(safe-area-inset-top));
     transition: visibility 0.1s, opacity 0.1s;
     visibility: hidden;
-    z-index: 90;
+    z-index: 95;
+  }
+
+  .folder-browser-mobile-scene-details-panel {
+    -webkit-overflow-scrolling: touch;
+    background: rgba(18, 20, 24, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 0.48rem;
+    bottom: calc(4.55rem + env(safe-area-inset-bottom));
+    box-shadow: 0 0.8rem 2.5rem rgba(0, 0, 0, 0.38);
+    color: #fff;
+    left: calc(0.65rem + env(safe-area-inset-left));
+    max-height: min(42vh, 20rem);
+    overflow: auto;
+    padding: 0.65rem;
+    position: absolute;
+    right: calc(0.65rem + env(safe-area-inset-right));
+    z-index: 94;
+  }
+
+  .folder-browser-mobile-scene-details-panel[hidden] {
+    display: none !important;
+  }
+
+  .folder-browser-mobile-scene-details-header {
+    align-items: center;
+    display: flex;
+    font-size: 0.92rem;
+    font-weight: 700;
+    justify-content: space-between;
+    margin-bottom: 0.55rem;
+  }
+
+  .folder-browser-mobile-scene-details-header button {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 0.3rem;
+    color: #fff;
+    display: inline-flex;
+    font-size: 0.82rem;
+    font-weight: 600;
+    justify-content: center;
+    line-height: 1;
+    min-height: 2rem;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .folder-browser-mobile-scene-details-content {
+    display: grid;
+    gap: 0.34rem;
+  }
+
+  .folder-browser-mobile-scene-detail-row {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: 3rem minmax(0, 1fr);
+    line-height: 1.32;
+  }
+
+  .folder-browser-mobile-scene-detail-row.long {
+    grid-template-columns: 1fr;
+    gap: 0.18rem;
+  }
+
+  .folder-browser-mobile-scene-detail-label {
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .folder-browser-mobile-scene-detail-value {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 0.82rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   body.folder-browser-scene-route.folder-browser-player-chrome-visible .folder-browser-mobile-player-controls {
@@ -1426,6 +1486,7 @@ body.folder-browser-lightbox-open {
   }
 
   body.folder-browser-player-landscape .scene-tabs,
+  body.folder-browser-player-landscape .folder-browser-mobile-scene-details-panel,
   body.folder-browser-player-landscape [data-folder-browser-details-toggle="1"],
   body.folder-browser-player-landscape .folder-browser-scene-details-toggle {
     display: none !important;
