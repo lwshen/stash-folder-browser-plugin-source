@@ -1357,16 +1357,23 @@ body.folder-browser-lightbox-open {
     left: calc(0.55rem + env(safe-area-inset-left));
     opacity: 0;
     pointer-events: none;
-    position: absolute;
+    position: fixed;
     right: calc(0.55rem + env(safe-area-inset-right));
     top: calc(3rem + env(safe-area-inset-top));
     transition: visibility 0.1s, opacity 0.1s;
     visibility: hidden;
-    z-index: 95;
+    z-index: 6100;
   }
 
   body.folder-browser-player-landscape .folder-browser-mobile-player-controls {
     top: calc(0.55rem + env(safe-area-inset-top));
+  }
+
+  body.folder-browser-scene-route:not(.folder-browser-player-immersive):not(.folder-browser-player-landscape)
+    .folder-browser-mobile-player-controls {
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
   }
 
   .folder-browser-mobile-scene-details-panel {
@@ -1381,9 +1388,9 @@ body.folder-browser-lightbox-open {
     max-height: min(42vh, 20rem);
     overflow: auto;
     padding: 0.65rem;
-    position: absolute;
+    position: fixed;
     right: calc(0.65rem + env(safe-area-inset-right));
-    z-index: 94;
+    z-index: 6095;
   }
 
   .folder-browser-mobile-scene-details-panel[hidden] {
