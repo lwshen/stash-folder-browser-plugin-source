@@ -878,7 +878,7 @@
     });
   }
 
-  function FolderTreeNode({ folder, depth, currentID, onSelect, onToggle }) {
+  function FolderTreeNode({ folder, depth, currentID, onSelect, onToggle, onContextMenu }) {
     const isActive = folder.id === currentID;
     const hasLoadedChildren = Array.isArray(folder.children);
     const hasChildren = hasLoadedChildren ? folder.children.length > 0 : true;
@@ -897,6 +897,7 @@
             window.getSelection()?.removeAllRanges();
             onToggle(folder);
           },
+          onContextMenu: (event) => onContextMenu?.(event, folder),
           style: { "--folder-depth": depth },
         },
         React.createElement(
@@ -940,6 +941,7 @@
               currentID,
               onSelect,
               onToggle,
+              onContextMenu,
             })
           )
         : null
@@ -4392,6 +4394,26 @@
       });
     }
 
+    function openFolderTreeContextMenu(event, folder) {
+      event.preventDefault();
+      event.stopPropagation();
+      const entry = folderActionEntry(folder);
+      const canMutate = canMutateFolder(folder);
+      setContextMenu({
+        kind: "tree-folder",
+        item: { entry },
+        x: Math.min(event.clientX, window.innerWidth - 190),
+        y: Math.min(event.clientY, window.innerHeight - 230),
+        actions: [
+          { label: "打开", onClick: () => onSelectFolder(folder) },
+          { label: "新建目录", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
+          { label: "移动", disabled: !canMutate, onClick: () => moveFileEntry({ entry }) },
+          { label: "重命名", disabled: !canMutate, onClick: () => renameFileEntry({ entry }) },
+          { label: "删除", danger: true, disabled: !canMutate, onClick: () => deleteFileEntry({ entry }) },
+        ],
+      });
+    }
+
     function downloadSelectedImages() {
       selectedImages.forEach((item) => {
         downloadImageItem(item);
@@ -4810,6 +4832,7 @@
               currentID: currentFolder?.id,
               onSelect: onSelectFolder,
               onToggle: onToggleFolder,
+              onContextMenu: openFolderTreeContextMenu,
             })
           )
         ),
