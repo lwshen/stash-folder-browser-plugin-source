@@ -2322,15 +2322,21 @@
     }
   }
 
-  function setMobileSceneDetailsOpen(open) {
+  function setMobileSceneDetailsOpen(open, options = {}) {
     document.body?.classList.toggle("folder-browser-scene-details-open", Boolean(open));
     syncMobileSceneDetailsPanelState();
-    showMobilePlayerChrome();
+    if (options.showChrome !== false) showMobilePlayerChrome();
   }
 
   function toggleMobileSceneDetailsPanel() {
     const isOpen = Boolean(document.body?.classList.contains("folder-browser-scene-details-open"));
     setMobileSceneDetailsOpen(!isOpen);
+  }
+
+  function closeMobileSceneDetailsPanel(options = {}) {
+    if (!document.body?.classList.contains("folder-browser-scene-details-open")) return false;
+    setMobileSceneDetailsOpen(false, options);
+    return true;
   }
 
   function clearMobileSceneDetailsPanel() {
@@ -2404,15 +2410,7 @@
   }
 
   function toggleSceneVideoPlayback() {
-    if (
-      document.body?.classList.contains("folder-browser-scene-details-open") &&
-      !document.body?.classList.contains("folder-browser-player-landscape")
-    ) {
-      document.body.classList.remove("folder-browser-scene-details-open");
-      syncMobileSceneDetailsPanelState();
-      showMobilePlayerChrome();
-      return;
-    }
+    closeMobileSceneDetailsPanel({ showChrome: false });
     const video = sceneVideoElement();
     if (!video) return;
     showMobilePlayerChrome();
@@ -2426,6 +2424,7 @@
   function scheduleMobilePlayerSingleTap(shouldTogglePlayback = false) {
     window.clearTimeout(mobileSingleTapTimer);
     showMobilePlayerChrome();
+    if (!shouldTogglePlayback && closeMobileSceneDetailsPanel()) return;
     if (shouldTogglePlayback) {
       mobileSingleTapTimer = window.setTimeout(toggleSceneVideoPlayback, MOBILE_PLAYER_DOUBLE_TAP_MS);
     }
