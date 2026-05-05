@@ -28,7 +28,7 @@ It is especially useful when:
 - Shows a folder tree with expandable nested folders.
 - Opens folders into a media wall of videos or images.
 - Displays HEIC/HEIF images when Stash has scanned them, using generated
-  previews for viewing and preserving original downloads.
+  previews in the wall and the original file when opened or downloaded.
 - Supports including or excluding child folders.
 - Supports sorting, size presets, selection, move, rename, delete, and download
   actions for supported Stash media entries.

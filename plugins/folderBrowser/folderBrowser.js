@@ -508,7 +508,7 @@
   function imageDisplayPath(image, file) {
     const paths = image?.paths || {};
     if (isHEIFFile(file)) {
-      return paths.preview || paths.thumbnail || paths.image;
+      return paths.image || paths.preview || paths.thumbnail;
     }
     return paths.image || paths.preview || paths.thumbnail;
   }
