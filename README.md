@@ -29,6 +29,8 @@ It is especially useful when:
 - Opens folders into a media wall of videos or images.
 - Displays HEIC/HEIF images when Stash has scanned them, using generated
   previews in the wall and the original file when opened or downloaded.
+- Adds a mobile image viewer with swipe navigation, pinch zoom, double-tap
+  landscape mode, progressive original loading, and edge-swipe return.
 - Supports including or excluding child folders.
 - Supports sorting, size presets, selection, move, rename, delete, and download
   actions for supported Stash media entries.

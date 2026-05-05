@@ -144,6 +144,25 @@
     });
   }
 
+  function restoreMediaIntoView(saved, fallbackScrollY) {
+    if (saved?.activeView === "image" && saved.lastOpenedImageID) {
+      [0, 50, 150, 350, 700, 1200, 1800].forEach((delay) => {
+        window.setTimeout(() => {
+          window.requestAnimationFrame(() => {
+            const target = document.querySelector(`[data-folder-browser-image-id="${saved.lastOpenedImageID}"]`);
+            if (target) {
+              target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+            } else {
+              setPageScrollY(fallbackScrollY || 0);
+            }
+          });
+        }, delay);
+      });
+      return;
+    }
+    restoreSceneIntoView(saved?.lastOpenedSceneID, fallbackScrollY);
+  }
+
   async function callGQL(query, variables) {
     const response = await fetch(`${baseURL}graphql`, {
       method: "POST",
@@ -513,10 +532,16 @@
     return paths.image || paths.preview || paths.thumbnail;
   }
 
+  function imagePreviewPath(image) {
+    const paths = image?.paths || {};
+    return paths.preview || paths.thumbnail || paths.image;
+  }
+
   function imageItems(images) {
     return (images ?? []).map((image) => {
       const file = primaryImageFile(image);
       const displayPath = imageDisplayPath(image, file);
+      const previewPath = imagePreviewPath(image);
       return {
         id: `image-${image.id}`,
         imageID: image.id,
@@ -529,6 +554,7 @@
         width: file?.width,
         height: file?.height,
         thumb: image.paths?.thumbnail || image.paths?.preview || image.paths?.image,
+        preview: previewPath,
         full: displayPath,
         original: image.paths?.image || displayPath,
         href: `/images/${image.id}`,
@@ -2612,6 +2638,7 @@
           {
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
+            "data-folder-browser-image-id": item.imageID,
             onClick: () => onOpen(index),
             onContextMenu: (event) => onContextMenu(event, item),
             style: { "--folder-wall-aspect": imageAspect(item) },
@@ -2765,8 +2792,15 @@
     const [pan, setPan] = React.useState({ x: 0, y: 0 });
     const [detailsOpen, setDetailsOpen] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
-    const dragRef = React.useRef(null);
+    const [landscape, setLandscape] = React.useState(false);
+    const [displaySrc, setDisplaySrc] = React.useState("");
+    const gestureRef = React.useRef(null);
     const imageRef = React.useRef(null);
+    const pointersRef = React.useRef(new Map());
+    const lastTapRef = React.useRef(null);
+    const lastPointerTypeRef = React.useRef("mouse");
+    const suppressClickRef = React.useRef(false);
+    const suppressClickTimerRef = React.useRef(0);
 
     React.useEffect(() => {
       if (!playing || !item || items.length <= 1) return undefined;
@@ -2786,15 +2820,65 @@
     }, [item, onClose, onMove]);
 
     React.useEffect(() => {
+      if (!item) return undefined;
+      document.body?.classList.add("folder-browser-lightbox-open");
+      return () => {
+        document.body?.classList.remove("folder-browser-lightbox-open");
+        screen.orientation?.unlock?.();
+      };
+    }, [item]);
+
+    React.useEffect(() => {
+      if (!item) return undefined;
+      document.body?.classList.toggle("folder-browser-image-lightbox-landscape", landscape);
+      if (landscape) {
+        setDetailsOpen(false);
+        screen.orientation?.lock?.("landscape").catch?.(() => {});
+      } else {
+        screen.orientation?.unlock?.();
+      }
+      return () => document.body?.classList.remove("folder-browser-image-lightbox-landscape");
+    }, [item, landscape]);
+
+    React.useEffect(() => {
+      if (!item) {
+        setDisplaySrc("");
+        return undefined;
+      }
+      const previewSrc = item.preview || item.thumb || item.full || item.original || "";
+      const fullSrc = item.full || item.original || previewSrc;
+      let cancelled = false;
+      setDisplaySrc(previewSrc);
+      if (!fullSrc || fullSrc === previewSrc) return undefined;
+      const image = new Image();
+      image.onload = () => {
+        if (!cancelled) setDisplaySrc(fullSrc);
+      };
+      image.onerror = () => {
+        if (!cancelled) setDisplaySrc(previewSrc);
+      };
+      image.src = fullSrc;
+      return () => {
+        cancelled = true;
+      };
+    }, [item]);
+
+    React.useEffect(() => {
       setZoom(1);
       setPan({ x: 0, y: 0 });
       setDetailsOpen(false);
       setMenuOpen(false);
+      pointersRef.current.clear();
+      gestureRef.current = null;
     }, [index]);
 
     React.useEffect(() => {
       if (zoom === 1) setPan({ x: 0, y: 0 });
     }, [zoom]);
+
+    React.useEffect(() => {
+      if (index === null) setLandscape(false);
+    }, [index]);
 
     if (!item) return null;
 
@@ -2824,25 +2908,191 @@
       });
     }
 
-    function onPointerDown(event) {
-      if (zoom === 1) return;
+    function pointerList() {
+      return [...pointersRef.current.values()];
+    }
+
+    function pointerDistance(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function pointerCenter(a, b) {
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    }
+
+    function relativeStagePoint(stage, point) {
+      const rect = stage.getBoundingClientRect();
+      return {
+        x: point.x - rect.left - rect.width / 2,
+        y: point.y - rect.top - rect.height / 2,
+      };
+    }
+
+    function suppressNextClick() {
+      suppressClickRef.current = true;
+      window.clearTimeout(suppressClickTimerRef.current);
+      suppressClickTimerRef.current = window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 300);
+    }
+
+    function consumeSuppressedClick(event) {
+      if (!suppressClickRef.current) return false;
       event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+
+    function toggleLandscape() {
+      setLandscape((current) => !current);
+    }
+
+    function maybeToggleLandscapeFromTap(event, gesture) {
+      const now = Date.now();
+      const last = lastTapRef.current;
+      if (
+        last &&
+        now - last.time < 340 &&
+        Math.hypot(event.clientX - last.x, event.clientY - last.y) < 44
+      ) {
+        lastTapRef.current = null;
+        suppressNextClick();
+        toggleLandscape();
+        return true;
+      }
+      lastTapRef.current = { time: now, x: event.clientX, y: event.clientY };
+      window.setTimeout(() => {
+        if (lastTapRef.current?.time === now) lastTapRef.current = null;
+      }, 360);
+      return false;
+    }
+
+    function beginSinglePointerGesture(event) {
+      gestureRef.current = {
+        mode: "single",
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startTime: Date.now(),
+        startPan: pan,
+        startZoom: zoom,
+        edgeSwipe: event.clientX <= 32 + (window.visualViewport?.offsetLeft || 0),
+      };
+    }
+
+    function beginPinchGesture(stage) {
+      const points = pointerList();
+      if (points.length < 2) return;
+      const first = points[0];
+      const second = points[1];
+      const center = pointerCenter(first, second);
+      gestureRef.current = {
+        mode: "pinch",
+        startDistance: Math.max(1, pointerDistance(first, second)),
+        startCenter: relativeStagePoint(stage, center),
+        startPan: pan,
+        startZoom: zoom,
+      };
+    }
+
+    function onPointerDown(event) {
+      if (event.target.closest?.(".folder-browser-lightbox-toolbar, .folder-browser-lightbox-details, .folder-browser-lightbox-menu")) return;
+      event.preventDefault();
+      lastPointerTypeRef.current = event.pointerType || "mouse";
       event.currentTarget.setPointerCapture?.(event.pointerId);
-      dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, pan };
+      pointersRef.current.set(event.pointerId, { id: event.pointerId, x: event.clientX, y: event.clientY });
+      if (pointersRef.current.size >= 2) {
+        beginPinchGesture(event.currentTarget);
+      } else {
+        beginSinglePointerGesture(event);
+      }
     }
 
     function onPointerMove(event) {
-      const drag = dragRef.current;
-      if (!drag || drag.pointerId !== event.pointerId) return;
-      setPan({
-        x: drag.pan.x + event.clientX - drag.startX,
-        y: drag.pan.y + event.clientY - drag.startY,
-      });
+      const pointer = pointersRef.current.get(event.pointerId);
+      if (!pointer) return;
+      event.preventDefault();
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
+      const gesture = gestureRef.current;
+      if (!gesture) return;
+
+      if (gesture.mode === "pinch" && pointersRef.current.size >= 2) {
+        const points = pointerList();
+        const first = points[0];
+        const second = points[1];
+        const distance = Math.max(1, pointerDistance(first, second));
+        const next = clamp(gesture.startZoom * (distance / gesture.startDistance), 1, 8);
+        const center = relativeStagePoint(event.currentTarget, pointerCenter(first, second));
+        const ratio = next / gesture.startZoom;
+        setZoom(next);
+        setPan(
+          next === 1
+            ? { x: 0, y: 0 }
+            : {
+                x: gesture.startPan.x + center.x - gesture.startCenter.x + (gesture.startCenter.x - gesture.startPan.x) * (1 - ratio),
+                y: gesture.startPan.y + center.y - gesture.startCenter.y + (gesture.startCenter.y - gesture.startPan.y) * (1 - ratio),
+              }
+        );
+        suppressNextClick();
+        return;
+      }
+
+      if (gesture.mode !== "single") return;
+      const dx = event.clientX - gesture.startX;
+      const dy = event.clientY - gesture.startY;
+      if (Math.hypot(dx, dy) > 8) suppressNextClick();
+      if (gesture.startZoom > 1) {
+        setPan({
+          x: gesture.startPan.x + dx,
+          y: gesture.startPan.y + dy,
+        });
+      }
+    }
+
+    function finishRemainingPointerGesture(stage) {
+      const points = pointerList();
+      if (points.length >= 2) {
+        beginPinchGesture(stage);
+      } else if (points.length === 1) {
+        const point = points[0];
+        gestureRef.current = {
+          mode: "single",
+          pointerId: point.id,
+          startX: point.x,
+          startY: point.y,
+          startTime: Date.now(),
+          startPan: pan,
+          startZoom: zoom,
+          edgeSwipe: point.x <= 32 + (window.visualViewport?.offsetLeft || 0),
+        };
+      } else {
+        gestureRef.current = null;
+      }
     }
 
     function onPointerUp(event) {
-      const drag = dragRef.current;
-      if (drag?.pointerId === event.pointerId) dragRef.current = null;
+      const gesture = gestureRef.current;
+      if (gesture?.mode === "single" && gesture.pointerId === event.pointerId) {
+        const dx = event.clientX - gesture.startX;
+        const dy = event.clientY - gesture.startY;
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+        const elapsed = Date.now() - gesture.startTime;
+        if (gesture.startZoom <= 1) {
+          if (gesture.edgeSwipe && dx > 72 && absY < Math.max(60, absX * 0.75)) {
+            suppressNextClick();
+            onClose();
+          } else if (absX > 64 && absX > absY * 1.2) {
+            suppressNextClick();
+            onMove(dx < 0 ? 1 : -1);
+          } else if (absX < 12 && absY < 12 && elapsed < 380) {
+            maybeToggleLandscapeFromTap(event, gesture);
+          }
+        }
+      }
+      pointersRef.current.delete(event.pointerId);
+      finishRemainingPointerGesture(event.currentTarget);
     }
 
     const file = primaryImageFile(item.image);
@@ -2851,7 +3101,7 @@
 
     return React.createElement(
       "div",
-      { className: "folder-browser-lightbox", role: "dialog", "aria-modal": "true" },
+      { className: "folder-browser-lightbox" + (landscape ? " landscape" : ""), role: "dialog", "aria-modal": "true" },
       React.createElement("div", { className: "folder-browser-lightbox-backdrop" }),
       React.createElement(
         "div",
@@ -2869,7 +3119,8 @@
             "div",
             { className: "folder-browser-lightbox-actions" },
             React.createElement("span", { className: "folder-browser-lightbox-count" }, `${index + 1} / ${items.length}`),
-            React.createElement(Button, { size: "sm", variant: detailsOpen ? "primary" : "secondary", onClick: () => setDetailsOpen(!detailsOpen), title: "详情" }, "!"),
+            React.createElement(Button, { size: "sm", variant: "secondary", onClick: toggleLandscape, title: landscape ? "竖屏查看" : "横屏查看" }, landscape ? "竖屏" : "横屏"),
+            React.createElement(Button, { size: "sm", variant: detailsOpen ? "primary" : "secondary", onClick: () => setDetailsOpen(!detailsOpen), title: "详情" }, "详情"),
             React.createElement(Button, { size: "sm", variant: "secondary", onClick: () => setZoom(1), disabled: zoom === 1 }, "重置"),
             React.createElement(
               "div",
@@ -2889,23 +3140,34 @@
         ),
         React.createElement(
           "div",
-          { className: "folder-browser-lightbox-stage", onWheel },
-          React.createElement("button", {
-            className: "folder-browser-lightbox-zone prev",
-            onClick: () => onMove(-1),
-            title: "上一张",
-          }),
-          React.createElement("img", {
-            ref: imageRef,
-            src: item.full || item.thumb,
-            alt: item.title,
-            onClick: () => {
-              if (zoom === 1) onMove(1);
-            },
+          {
+            className: "folder-browser-lightbox-stage",
+            onWheel,
             onPointerDown,
             onPointerMove,
             onPointerUp,
             onPointerCancel: onPointerUp,
+            onDoubleClick: (event) => {
+              event.preventDefault();
+              toggleLandscape();
+            },
+          },
+          React.createElement("button", {
+            className: "folder-browser-lightbox-zone prev",
+            onClick: (event) => {
+              if (consumeSuppressedClick(event)) return;
+              if (lastPointerTypeRef.current !== "mouse") return;
+              onMove(-1);
+            },
+            title: "上一张",
+          }),
+          React.createElement("img", {
+            ref: imageRef,
+            src: displaySrc || item.preview || item.thumb || item.full,
+            alt: item.title,
+            onClick: (event) => {
+              consumeSuppressedClick(event);
+            },
             style: {
               "--folder-lightbox-zoom": zoom,
               "--folder-lightbox-pan-x": `${pan.x}px`,
@@ -2914,7 +3176,11 @@
           }),
           React.createElement("button", {
             className: "folder-browser-lightbox-zone next",
-            onClick: () => onMove(1),
+            onClick: (event) => {
+              if (consumeSuppressedClick(event)) return;
+              if (lastPointerTypeRef.current !== "mouse") return;
+              onMove(1);
+            },
             title: "下一张",
           }),
           detailsOpen
@@ -3270,7 +3536,7 @@
             restoreContentRef.current = false;
             if (shouldRestoreContent && restoreScrollRef.current) {
               restoreScrollRef.current = false;
-              restoreSceneIntoView(saved.lastOpenedSceneID, saved.scrollY || 0);
+              restoreMediaIntoView(saved, saved.scrollY || 0);
             }
           }
         } catch (e) {
@@ -3473,7 +3739,26 @@
     const allWallImagesSelected = wallImages.length > 0 && wallImages.every((item) => selectedImageIDs.includes(item.imageID));
     const someWallImagesSelected = wallImages.some((item) => selectedImageIDs.includes(item.imageID));
 
-    const openImagePreview = React.useCallback((index) => setLightboxIndex(index), []);
+    function scrollImageIntoView(imageID) {
+      if (!imageID) return;
+      window.requestAnimationFrame(() => {
+        const tile = scrollAreaRef.current?.querySelector(`[data-folder-browser-image-id="${imageID}"]`);
+        tile?.scrollIntoView?.({ block: "center", inline: "nearest" });
+      });
+    }
+
+    const openImagePreview = React.useCallback((index) => {
+      const item = wallImages[index];
+      if (item) persistFolderState({ activeView: "image", lastOpenedImageID: item.imageID });
+      setLightboxIndex(index);
+    }, [persistFolderState, wallImages]);
+
+    const closeImagePreview = React.useCallback(() => {
+      const item = lightboxIndex === null ? null : wallImages[lightboxIndex];
+      if (item) persistFolderState({ activeView: "image", lastOpenedImageID: item.imageID });
+      setLightboxIndex(null);
+      if (item) scrollImageIntoView(item.imageID);
+    }, [lightboxIndex, persistFolderState, wallImages]);
 
     const moveLightbox = React.useCallback(
       (delta) => {
@@ -4149,7 +4434,7 @@
             index: lightboxIndex,
             playing: slideshow,
             onClose: () => {
-              setLightboxIndex(null);
+              closeImagePreview();
               setSlideshow(false);
             },
             onMove: moveLightbox,
