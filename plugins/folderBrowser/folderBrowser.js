@@ -44,8 +44,6 @@
     { wallHeight: 128, columns: 3 },
     { wallHeight: 190, columns: 2 },
   ];
-  const DESKTOP_FILE_GRID_MIN_WIDTHS = ["8rem", "9.5rem", "11rem", "13rem"];
-  const MOBILE_FILE_GRID_MIN_WIDTHS = ["6.4rem", "7.4rem", "9.4rem"];
   const SORT_OPTIONS = [
     { key: "file_mod_time", label: "修改时间" },
     { key: "created_at", label: "入库时间" },
@@ -2886,15 +2884,13 @@
     );
   }
 
-  function FileEntryTile({ item, onOpen, onContextMenu }) {
+  function OtherEntryRow({ item, onOpen, onContextMenu }) {
     const longPressRef = React.useRef(null);
     const longPressTriggeredRef = React.useRef(false);
     const entry = item.entry;
     const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
-    const scene = item.scene;
-    const image = item.imageItem;
-    const preview = image?.thumb || scene?.paths?.screenshot;
     const title = entry.basename || pathBasename(entry.path);
+    const extension = String(entry.extension || "").replace(/^\./, "");
     const meta = [
       mediaTypeLabel(entry),
       isDirectory ? "" : formatBytes(entry.size),
@@ -2940,7 +2936,7 @@
     return React.createElement(
       "button",
       {
-        className: `folder-browser-file-entry folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}`,
+        className: `folder-browser-file-entry-row folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}`,
         title: entry.path,
         onClick,
         onContextMenu: (event) => onContextMenu(event, item),
@@ -2951,10 +2947,8 @@
       },
       React.createElement(
         "span",
-        { className: "folder-browser-file-entry-preview" },
-        preview
-          ? React.createElement("img", { src: preview, alt: title, loading: "lazy" })
-          : React.createElement("span", { className: "folder-browser-file-entry-icon" }, isDirectory ? "DIR" : (entry.extension || entry.media_type || "FILE"))
+        { className: "folder-browser-file-entry-row-icon" },
+        isDirectory ? "DIR" : (extension || entry.media_type || "FILE")
       ),
       React.createElement(
         "span",
@@ -2965,15 +2959,12 @@
     );
   }
 
-  function FileEntryGrid({ items, minWidth, onOpen, onContextMenu }) {
+  function OtherEntryList({ items, onOpen, onContextMenu }) {
     return React.createElement(
       "div",
-      {
-        className: "folder-browser-file-entry-grid",
-        style: minWidth ? { "--folder-browser-file-entry-min": minWidth } : undefined,
-      },
+      { className: "folder-browser-file-entry-list" },
       items.map((item) =>
-        React.createElement(FileEntryTile, {
+        React.createElement(OtherEntryRow, {
           key: item.entry.path,
           item,
           onOpen,
@@ -3799,7 +3790,13 @@
       : (isMobileLayout ? MOBILE_IMAGE_SIZE_PRESETS : IMAGE_SIZE_PRESETS).length - 1;
     const onActiveSizeChange = React.useCallback(
       (value) => {
-        if (activeView === "video" && isMobileLayout) {
+        if (activeView === "all" && isMobileLayout) {
+          setMobileVideoSizeIndex(value);
+          setMobileImageSizeIndex(value);
+        } else if (activeView === "all") {
+          setVideoSizeIndex(value);
+          setImageSizeIndex(value);
+        } else if (activeView === "video" && isMobileLayout) {
           setMobileVideoSizeIndex(value);
         } else if (activeView === "image" && isMobileLayout) {
           setMobileImageSizeIndex(value);
@@ -3856,7 +3853,7 @@
         setSelectedImageIDs([]);
         try {
           const canQueryScannedMedia = currentFolder.id && !isPathOnlyFolder(currentFolder);
-          const criterion = canQueryScannedMedia ? folderCriterion(currentFolder.id, false) : null;
+          const criterion = canQueryScannedMedia ? folderCriterion(currentFolder.id, includeChildren) : null;
           const [listingData, sceneData, imageData] = await Promise.all([
             callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentFolder.path }),
             canQueryScannedMedia
@@ -3901,7 +3898,7 @@
       return () => {
         cancelled = true;
       };
-    }, [currentFolder, sortState, reloadKey]);
+    }, [currentFolder, includeChildren, sortState, reloadKey]);
 
     async function loadChildren(folder) {
       setFolderTree((current) =>
@@ -4039,25 +4036,15 @@
         })),
       [folderEntries, imageByPath, sceneByPath, sortState]
     );
-    const visibleFileEntryItems = React.useMemo(
+    const otherEntryItems = React.useMemo(
       () =>
         fileEntryItems.filter((item) => {
           const entry = item.entry;
           const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
-          if (isDirectory || activeView === "all") return true;
-          if (activeView === "video") return entry.media_type === "VIDEO";
-          if (activeView === "image") return entry.media_type === "IMAGE";
-          return !["VIDEO", "IMAGE", "DIRECTORY"].includes(entry.media_type);
+          return isDirectory || !["VIDEO", "IMAGE"].includes(entry.media_type);
         }),
-      [activeView, fileEntryItems]
-    );
-    const lightboxImages = React.useMemo(
-      () => fileEntryItems.map((item) => item.imageItem).filter(Boolean),
       [fileEntryItems]
     );
-    const fileGridMinWidth = isMobileLayout
-      ? MOBILE_FILE_GRID_MIN_WIDTHS[activeSizeIndex] || MOBILE_FILE_GRID_MIN_WIDTHS[1]
-      : DESKTOP_FILE_GRID_MIN_WIDTHS[activeSizeIndex] || DESKTOP_FILE_GRID_MIN_WIDTHS[2];
     const visibleVideos = React.useMemo(
       () => videos,
       [videos]
@@ -4090,6 +4077,7 @@
         ),
       [visibleImages, contentWidth, imageSizePreset.columns, imageSizePreset.wallHeight, images.length, imageTotal, isMobileLayout]
     );
+    const lightboxImages = wallImages;
     const selectedImages = React.useMemo(
       () => wallImages.filter((item) => selectedImageIDs.includes(item.imageID)),
       [wallImages, selectedImageIDs]
@@ -4775,6 +4763,109 @@
       );
     }
 
+    const showVideoSection = activeView === "all" || activeView === "video";
+    const showImageSection = activeView === "all" || activeView === "image";
+    const showOtherSection = activeView === "all" || activeView === "other";
+    const activeMediaCount = activeView === "video"
+      ? `${visibleVideos.length}/${sceneTotal}`
+      : activeView === "image"
+        ? `${visibleImages.length}/${imageTotal}`
+        : activeView === "other"
+          ? `${otherEntryItems.length}`
+          : `共 ${visibleVideos.length + visibleImages.length + otherEntryItems.length}`;
+    const activeViewEmpty =
+      !loading &&
+      !loadingEntries &&
+      currentFolder &&
+      ((activeView === "video" && visibleVideos.length === 0) ||
+        (activeView === "image" && visibleImages.length === 0) ||
+        (activeView === "other" && otherEntryItems.length === 0) ||
+        (activeView === "all" && visibleVideos.length === 0 && visibleImages.length === 0 && otherEntryItems.length === 0));
+
+    function renderVideoSection() {
+      if (!showVideoSection) return null;
+      return React.createElement(
+        "section",
+        { className: "folder-browser-section", key: "videos" },
+        React.createElement(MediaViewHeader, {
+          title: "视频",
+          count: `${visibleVideos.length}/${sceneTotal}`,
+          checked: allWallVideosSelected,
+          indeterminate: someWallVideosSelected && !allWallVideosSelected,
+          onSelectAllChange: toggleAllScenes,
+        }),
+        React.createElement(SceneWall, {
+          scenes: wallVideos,
+          wallHeight: videoSizePreset.wallHeight,
+          mobileColumns: isMobileLayout ? videoSizePreset.columns : undefined,
+          fillTail: scenes.length >= sceneTotal,
+          selectedIDs: selectedSceneIDs,
+          touchPreviewSceneID,
+          previewSceneIDs: previewVisibleSceneIDs,
+          onBeforeOpen: (scene) => persistFolderState({ activeView: "video", lastOpenedSceneID: scene.id }),
+          onSelectionChange: toggleSceneSelection,
+          onContextMenu: (event, scene) => openMediaContextMenu(event, "video", scene),
+          onTouchPreview: setTouchPreviewSceneID,
+        }),
+        React.createElement(AutoLoadMore, {
+          innerRef: showImageSection || showOtherSection ? undefined : loadMoreRef,
+          disabled: false,
+          loading: loadingScenes,
+          remaining: Math.max(0, sceneTotal - scenes.length),
+          onLoad: loadMoreScenes,
+        })
+      );
+    }
+
+    function renderImageSection() {
+      if (!showImageSection) return null;
+      return React.createElement(
+        "section",
+        { className: "folder-browser-section", key: "images" },
+        React.createElement(MediaViewHeader, {
+          title: "图片",
+          count: `${visibleImages.length}/${imageTotal}`,
+          checked: allWallImagesSelected,
+          indeterminate: someWallImagesSelected && !allWallImagesSelected,
+          onSelectAllChange: toggleAllImages,
+        }),
+        React.createElement(ImageWall, {
+          items: wallImages,
+          wallHeight: imageSizePreset.wallHeight,
+          mobileColumns: isMobileLayout ? imageSizePreset.columns : undefined,
+          fillTail: images.length >= imageTotal,
+          selectedIDs: selectedImageIDs,
+          onOpen: openImagePreview,
+          onSelectionChange: toggleImageSelection,
+          onContextMenu: (event, item) => openMediaContextMenu(event, "image", item),
+        }),
+        React.createElement(AutoLoadMore, {
+          innerRef: showOtherSection ? undefined : loadMoreRef,
+          disabled: false,
+          loading: loadingImages,
+          remaining: Math.max(0, imageTotal - images.length),
+          onLoad: loadMoreImages,
+        })
+      );
+    }
+
+    function renderOtherSection() {
+      if (!showOtherSection) return null;
+      return React.createElement(
+        "section",
+        { className: "folder-browser-section", key: "other" },
+        React.createElement(MediaViewHeader, {
+          title: "其他",
+          count: `${otherEntryItems.length}`,
+        }),
+        React.createElement(OtherEntryList, {
+          items: otherEntryItems,
+          onOpen: openFileEntry,
+          onContextMenu: openFileEntryContextMenu,
+        })
+      );
+    }
+
     return React.createElement(
       "div",
       {
@@ -4820,7 +4911,7 @@
               ? React.createElement(MobileToolbar, {
                   currentFolder,
                   activeView,
-                  mediaCount: `${visibleFileEntryItems.length}/${fileEntryItems.length}`,
+                  mediaCount: activeMediaCount,
                   sortState,
                   includeChildren,
                   previewAllVisible,
@@ -4847,9 +4938,9 @@
                   sizeIndex: activeSizeIndex,
                   sizeMax: activeSizeMax,
                   previewAllVisible,
-                  mediaCount: `${visibleFileEntryItems.length}/${fileEntryItems.length}`,
-                  allSelected: activeView === "video" ? allWallVideosSelected : allWallImagesSelected,
-                  someSelected: activeView === "video" ? someWallVideosSelected : someWallImagesSelected,
+                  mediaCount: activeMediaCount,
+                  allSelected: activeView === "video" ? allWallVideosSelected : activeView === "image" ? allWallImagesSelected : false,
+                  someSelected: activeView === "video" ? someWallVideosSelected : activeView === "image" ? someWallImagesSelected : false,
                   onSelectAllChange: activeView === "video" ? toggleAllScenes : activeView === "image" ? toggleAllImages : undefined,
                   onIncludeChildrenChange: setIncludeChildren,
                   onActiveViewChange: setActiveView,
@@ -4876,18 +4967,21 @@
             React.createElement(
               "div",
               { className: "folder-browser-sections" },
-              React.createElement(FileEntryGrid, {
-                items: visibleFileEntryItems,
-                minWidth: fileGridMinWidth,
-                onOpen: openFileEntry,
-                onContextMenu: openFileEntryContextMenu,
-              })
+              renderVideoSection(),
+              renderImageSection(),
+              renderOtherSection()
             ),
-            !loading && !loadingEntries && visibleFileEntryItems.length === 0
+            activeViewEmpty
               ? React.createElement(
                   "div",
                   { className: "folder-browser-empty" },
-                  currentFolder ? "当前目录没有可显示条目。" : "No library folders found."
+                  activeView === "video"
+                    ? "This folder has no scanned scenes."
+                    : activeView === "image"
+                      ? "This folder has no scanned images."
+                      : activeView === "other"
+                        ? "当前目录没有其他文件。"
+                        : "当前目录没有可显示条目。"
                 )
               : null
           ),

@@ -627,6 +627,63 @@
   white-space: nowrap;
 }
 
+.folder-browser-file-entry-list {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.35rem;
+  overflow: hidden;
+}
+
+.folder-browser-file-entry-row {
+  -webkit-touch-callout: none;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.035);
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: 3.15rem minmax(0, 1fr);
+  min-height: 3.4rem;
+  padding: 0.52rem 0.68rem;
+  text-align: left;
+  touch-action: manipulation;
+  user-select: none;
+  width: 100%;
+}
+
+.folder-browser-file-entry-row:last-child {
+  border-bottom: 0;
+}
+
+.folder-browser-file-entry-row:hover,
+.folder-browser-file-entry-row:focus-visible {
+  background: rgba(255, 255, 255, 0.085);
+  outline: none;
+}
+
+.folder-browser-file-entry-row-icon {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.075);
+  border-radius: 0.28rem;
+  color: rgba(255, 255, 255, 0.72);
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  height: 2.1rem;
+  justify-content: center;
+  letter-spacing: 0;
+  overflow: hidden;
+  padding: 0 0.35rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.folder-browser-file-entry-row.folder-browser-file-entry-directory .folder-browser-file-entry-row-icon {
+  background: rgba(13, 110, 253, 0.2);
+  color: rgba(214, 231, 255, 0.96);
+}
+
 .folder-browser-scroll-area {
   flex: 1 1 auto;
   min-height: 0;
