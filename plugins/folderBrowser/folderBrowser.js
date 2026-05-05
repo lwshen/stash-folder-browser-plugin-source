@@ -16,6 +16,7 @@
   const SCENE_PAGE_ROWS = 4;
   const IMAGE_PAGE_ROWS = 5;
   const WALL_GAP = 4;
+  const MOBILE_MEDIA_WINDOW_LIMIT = 1000;
   const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
   const DEFAULT_SIDEBAR_WIDTH = 320;
   const MIN_SIDEBAR_WIDTH = 220;
@@ -45,6 +46,7 @@
     { wallHeight: 190, columns: 2 },
   ];
   const SORT_OPTIONS = [
+    { key: "filename", label: "文件名" },
     { key: "file_mod_time", label: "修改时间" },
     { key: "created_at", label: "入库时间" },
     { key: "filesize", label: "文件大小" },
@@ -445,9 +447,13 @@
     };
   }
 
+  function mediaSortKey(sort) {
+    return sort === "filename" ? "path" : sort;
+  }
+
   function findFilter(sort, direction, perPage, page) {
     return {
-      sort,
+      sort: mediaSortKey(sort),
       direction,
       per_page: perPage,
       page,
@@ -775,6 +781,7 @@
   function fileEntrySortValue(entry, sortKey) {
     if (sortKey === "filesize") return Number(entry.size) || 0;
     if (sortKey === "file_mod_time" || sortKey === "created_at") return new Date(entry.mod_time || 0).getTime() || 0;
+    if (sortKey === "path") return String(entry.path || entry.basename || "").toLowerCase();
     return String(entry.basename || entry.path || "").toLowerCase();
   }
 
@@ -1035,18 +1042,20 @@
             )
           )
         ),
-        React.createElement(
-          "label",
-          { className: "folder-browser-size-control" },
-          React.createElement("span", null, "大小"),
-          React.createElement(Form.Control, {
-            type: "range",
-            min: 0,
-            max: sizeMax,
-            value: sizeIndex,
-            onChange: (event) => onSizeChange(Number(event.target.value)),
-          })
-        ),
+        activeView !== "other"
+          ? React.createElement(
+              "label",
+              { className: "folder-browser-size-control" },
+              React.createElement("span", null, "大小"),
+              React.createElement(Form.Control, {
+                type: "range",
+                min: 0,
+                max: sizeMax,
+                value: sizeIndex,
+                onChange: (event) => onSizeChange(Number(event.target.value)),
+              })
+            )
+          : null,
         React.createElement(
           Button,
           {
@@ -1067,15 +1076,6 @@
               "自动播放可见预览"
             )
           : null,
-        React.createElement(
-          Button,
-          {
-            size: "sm",
-            variant: activeView === "all" ? "primary" : "secondary",
-            onClick: () => onActiveViewChange("all"),
-          },
-          "全部"
-        ),
         React.createElement(
           Button,
           {
@@ -1175,11 +1175,6 @@
           { className: "folder-browser-mobile-view-switch folder-browser-mobile-control-cluster" },
           React.createElement(
             Button,
-            { size: "sm", variant: activeView === "all" ? "primary" : "secondary", onClick: () => onActiveViewChange("all") },
-            "全部"
-          ),
-          React.createElement(
-            Button,
             { size: "sm", variant: activeView === "video" ? "primary" : "secondary", onClick: () => onActiveViewChange("video") },
             "视频"
           ),
@@ -1194,23 +1189,25 @@
             "其他"
           )
         ),
-        React.createElement("span", { className: "folder-browser-mobile-divider" }),
-        React.createElement(
-          "div",
-          { className: "folder-browser-mobile-size-actions folder-browser-mobile-control-cluster" },
-          MOBILE_SIZE_LABELS.map((label, index) =>
-            React.createElement(
-              Button,
-              {
-                key: label,
-                size: "sm",
-                variant: sizeIndex === index ? "primary" : "secondary",
-                onClick: () => onSizeChange(index),
-              },
-              label
+        activeView !== "other" ? React.createElement("span", { className: "folder-browser-mobile-divider" }) : null,
+        activeView !== "other"
+          ? React.createElement(
+              "div",
+              { className: "folder-browser-mobile-size-actions folder-browser-mobile-control-cluster" },
+              MOBILE_SIZE_LABELS.map((label, index) =>
+                React.createElement(
+                  Button,
+                  {
+                    key: label,
+                    size: "sm",
+                    variant: sizeIndex === index ? "primary" : "secondary",
+                    onClick: () => onSizeChange(index),
+                  },
+                  label
+                )
+              )
             )
-          )
-        ),
+          : null,
         React.createElement("span", { className: "folder-browser-mobile-divider" }),
         React.createElement(
           "div",
@@ -1359,6 +1356,37 @@
     return style;
   }
 
+  function mediaWallWindow(items, { enabled, wallRef, scrollTop, viewportHeight, wallHeight, columns }) {
+    const count = items.length;
+    const columnCount = Math.max(1, Number(columns) || 1);
+    const rowsInWindow = Math.max(1, Math.floor(MOBILE_MEDIA_WINDOW_LIMIT / columnCount));
+    const totalRows = Math.ceil(count / columnCount);
+    if (!enabled || count <= MOBILE_MEDIA_WINDOW_LIMIT || totalRows <= rowsInWindow) {
+      return { items, startIndex: 0, topSpacer: 0, bottomSpacer: 0 };
+    }
+
+    const rowHeight = wallHeight + WALL_GAP;
+    const wallTop = Math.max(0, wallRef.current?.offsetTop || 0);
+    const firstVisibleRow = Math.max(0, Math.floor((scrollTop - wallTop) / rowHeight));
+    const viewportRows = Math.max(1, Math.ceil((viewportHeight || window.innerHeight || 800) / rowHeight));
+    const focusRow = clamp(firstVisibleRow + Math.floor(viewportRows / 2), 0, totalRows - 1);
+    const startRow = clamp(
+      focusRow - Math.floor(rowsInWindow / 2),
+      0,
+      Math.max(0, totalRows - rowsInWindow)
+    );
+    const endRow = Math.min(totalRows, startRow + rowsInWindow);
+    const startIndex = startRow * columnCount;
+    const endIndex = Math.min(count, endRow * columnCount);
+
+    return {
+      items: items.slice(startIndex, endIndex),
+      startIndex,
+      topSpacer: Math.max(0, startRow * rowHeight - WALL_GAP),
+      bottomSpacer: Math.max(0, (totalRows - endRow) * rowHeight - WALL_GAP),
+    };
+  }
+
   function SceneWallTile({ scene, selected, touchPreviewing, forcePreview, onBeforeOpen, onSelectionChange, onContextMenu, onTouchPreview }) {
     const [previewFailed, setPreviewFailed] = React.useState(false);
     const [hovering, setHovering] = React.useState(false);
@@ -1471,13 +1499,24 @@
     );
   }
 
-  function SceneWall({ scenes, wallHeight, mobileColumns, fillTail, selectedIDs, touchPreviewSceneID, previewSceneIDs, onBeforeOpen, onSelectionChange, onContextMenu, onTouchPreview }) {
+  function WallSpacer({ height, position }) {
+    if (!height) return null;
+    return React.createElement("div", {
+      key: `${position}-spacer`,
+      className: "folder-browser-wall-spacer",
+      style: { height: `${height}px` },
+    });
+  }
+
+  function SceneWall({ scenes, wallHeight, mobileColumns, fillTail, selectedIDs, touchPreviewSceneID, previewSceneIDs, topSpacer, bottomSpacer, innerRef, onBeforeOpen, onSelectionChange, onContextMenu, onTouchPreview }) {
     return React.createElement(
       "div",
       {
+        ref: innerRef,
         className: "folder-browser-media-wall" + (fillTail ? " folder-browser-media-wall-fill-tail" : ""),
         style: wallStyle(wallHeight, mobileColumns),
       },
+      WallSpacer({ height: topSpacer, position: "top" }),
       scenes.map((scene) =>
         React.createElement(SceneWallTile, {
           key: scene.id,
@@ -1490,7 +1529,8 @@
           onContextMenu,
           onTouchPreview,
         })
-      )
+      ),
+      WallSpacer({ height: bottomSpacer, position: "bottom" })
     );
   }
 
@@ -2872,13 +2912,15 @@
     document.addEventListener("webkitbeginfullscreen", lockCurrentOrientation, true);
   }
 
-  function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, onOpen, onSelectionChange, onContextMenu }) {
+  function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, startIndex = 0, topSpacer, bottomSpacer, innerRef, onOpen, onSelectionChange, onContextMenu }) {
     return React.createElement(
       "div",
       {
+        ref: innerRef,
         className: "folder-browser-media-wall" + (fillTail ? " folder-browser-media-wall-fill-tail" : ""),
         style: wallStyle(wallHeight, mobileColumns),
       },
+      WallSpacer({ height: topSpacer, position: "top" }),
       items.map((item, index) => {
         const selected = selectedIDs.includes(item.imageID);
         return (
@@ -2888,7 +2930,7 @@
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
             "data-folder-browser-image-id": item.imageID,
-            onClick: () => onOpen(index),
+            onClick: () => onOpen(startIndex + index),
             onContextMenu: (event) => onContextMenu(event, item),
             style: { "--folder-wall-aspect": imageAspect(item) },
             title: item.path,
@@ -2908,7 +2950,8 @@
             : React.createElement("span", { className: "folder-browser-media-placeholder" }, "Image")
         )
         );
-      })
+      }),
+      WallSpacer({ height: bottomSpacer, position: "bottom" })
     );
   }
 
@@ -3596,6 +3639,12 @@
     const mobileFolderTreeRef = React.useRef(null);
     const sceneLoadMoreRef = React.useRef(null);
     const imageLoadMoreRef = React.useRef(null);
+    const sceneWallRef = React.useRef(null);
+    const imageWallRef = React.useRef(null);
+    const mobileScrollFrameRef = React.useRef(null);
+    const initialSortState = savedState?.sortState?.key === "basename"
+      ? { ...savedState.sortState, key: "filename" }
+      : savedState?.sortState;
     const [currentFolder, setCurrentFolder] = React.useState(savedState?.currentFolder ?? null);
     const [contentWidth, setContentWidth] = React.useState(0);
     const [folderTree, setFolderTree] = React.useState([]);
@@ -3607,8 +3656,8 @@
     const [scenePage, setScenePage] = React.useState(0);
     const [imagePage, setImagePage] = React.useState(0);
     const [includeChildren, setIncludeChildren] = React.useState(savedState?.includeChildren ?? true);
-    const [activeView, setActiveView] = React.useState(["all", "video", "image", "other"].includes(savedState?.activeView) ? savedState.activeView : "all");
-    const [sortState, setSortState] = React.useState(savedState?.sortState ?? { key: "created_at", direction: "DESC" });
+    const [activeView, setActiveView] = React.useState(["video", "image", "other"].includes(savedState?.activeView) ? savedState.activeView : "video");
+    const [sortState, setSortState] = React.useState(initialSortState ?? { key: "created_at", direction: "DESC" });
     const [videoSizeIndex, setVideoSizeIndex] = React.useState(savedState?.videoSizeIndex ?? savedState?.sizeIndex ?? 2);
     const [imageSizeIndex, setImageSizeIndex] = React.useState(savedState?.imageSizeIndex ?? Math.min(3, (savedState?.sizeIndex ?? 2) + 1));
     const [mobileVideoSizeIndex, setMobileVideoSizeIndex] = React.useState(savedState?.mobileVideoSizeIndex ?? 1);
@@ -3634,6 +3683,7 @@
     const [loadingScenes, setLoadingScenes] = React.useState(false);
     const [loadingImages, setLoadingImages] = React.useState(false);
     const [loadingEntries, setLoadingEntries] = React.useState(false);
+    const [mobileScrollMetrics, setMobileScrollMetrics] = React.useState({ top: 0, height: 0 });
     const [error, setError] = React.useState("");
 
     React.useEffect(() => {
@@ -3658,6 +3708,30 @@
         setMobileControlsOpen(false);
       }
     }, [isMobileLayout]);
+
+    const updateMobileScrollMetrics = React.useCallback(() => {
+      const node = scrollAreaRef.current;
+      if (!node) return;
+      setMobileScrollMetrics({
+        top: node.scrollTop || 0,
+        height: node.clientHeight || window.innerHeight || 0,
+      });
+    }, []);
+
+    const scheduleMobileScrollMetrics = React.useCallback(() => {
+      if (!isMobileLayout || mobileScrollFrameRef.current) return;
+      mobileScrollFrameRef.current = window.requestAnimationFrame(() => {
+        mobileScrollFrameRef.current = null;
+        updateMobileScrollMetrics();
+      });
+    }, [isMobileLayout, updateMobileScrollMetrics]);
+
+    React.useEffect(() => () => {
+      if (mobileScrollFrameRef.current) {
+        window.cancelAnimationFrame(mobileScrollFrameRef.current);
+        mobileScrollFrameRef.current = null;
+      }
+    }, []);
 
     React.useEffect(() => {
       if (!isMobileLayout || !mobileFoldersOpen) return undefined;
@@ -3835,13 +3909,7 @@
       : (isMobileLayout ? MOBILE_IMAGE_SIZE_PRESETS : IMAGE_SIZE_PRESETS).length - 1;
     const onActiveSizeChange = React.useCallback(
       (value) => {
-        if (activeView === "all" && isMobileLayout) {
-          setMobileVideoSizeIndex(value);
-          setMobileImageSizeIndex(value);
-        } else if (activeView === "all") {
-          setVideoSizeIndex(value);
-          setImageSizeIndex(value);
-        } else if (activeView === "video" && isMobileLayout) {
+        if (activeView === "video" && isMobileLayout) {
           setMobileVideoSizeIndex(value);
         } else if (activeView === "image" && isMobileLayout) {
           setMobileImageSizeIndex(value);
@@ -3865,6 +3933,21 @@
         : pageSizeForRows(contentWidth, imageSizePreset.wallHeight * 1.2, IMAGE_PAGE_ROWS, WALL_GAP),
       [contentWidth, imageSizePreset.columns, imageSizePreset.wallHeight, isMobileLayout]
     );
+
+    React.useEffect(() => {
+      if (!isMobileLayout) return undefined;
+      const frame = window.requestAnimationFrame(updateMobileScrollMetrics);
+      return () => window.cancelAnimationFrame(frame);
+    }, [
+      activeView,
+      currentFolder?.id,
+      imageSizePreset.wallHeight,
+      images.length,
+      isMobileLayout,
+      scenes.length,
+      updateMobileScrollMetrics,
+      videoSizePreset.wallHeight,
+    ]);
 
     React.useEffect(() => {
       if (!currentFolder) {
@@ -4155,6 +4238,30 @@
         ),
       [visibleImages, contentWidth, imageSizePreset.columns, imageSizePreset.wallHeight, images.length, imageTotal, isMobileLayout]
     );
+    const renderVideoWindow = React.useMemo(
+      () =>
+        mediaWallWindow(wallVideos, {
+          enabled: isMobileLayout,
+          wallRef: sceneWallRef,
+          scrollTop: mobileScrollMetrics.top,
+          viewportHeight: mobileScrollMetrics.height,
+          wallHeight: videoSizePreset.wallHeight,
+          columns: videoSizePreset.columns,
+        }),
+      [isMobileLayout, mobileScrollMetrics.height, mobileScrollMetrics.top, videoSizePreset.columns, videoSizePreset.wallHeight, wallVideos]
+    );
+    const renderImageWindow = React.useMemo(
+      () =>
+        mediaWallWindow(wallImages, {
+          enabled: isMobileLayout,
+          wallRef: imageWallRef,
+          scrollTop: mobileScrollMetrics.top,
+          viewportHeight: mobileScrollMetrics.height,
+          wallHeight: imageSizePreset.wallHeight,
+          columns: imageSizePreset.columns,
+        }),
+      [imageSizePreset.columns, imageSizePreset.wallHeight, isMobileLayout, mobileScrollMetrics.height, mobileScrollMetrics.top, wallImages]
+    );
     const lightboxImages = wallImages;
     const selectedImages = React.useMemo(
       () => wallImages.filter((item) => selectedImageIDs.includes(item.imageID)),
@@ -4285,8 +4392,8 @@
 
     React.useEffect(() => {
       if (!currentFolder) return undefined;
-      const canLoadVideos = (activeView === "all" || activeView === "video") && scenes.length < sceneTotal && !loadingScenes;
-      const canLoadImages = (activeView === "all" || activeView === "image") && images.length < imageTotal && !loadingImages;
+      const canLoadVideos = activeView === "video" && scenes.length < sceneTotal && !loadingScenes;
+      const canLoadImages = activeView === "image" && images.length < imageTotal && !loadingImages;
       const targets = [
         canLoadVideos && sceneLoadMoreRef.current ? { node: sceneLoadMoreRef.current, load: loadMoreScenes } : null,
         canLoadImages && imageLoadMoreRef.current ? { node: imageLoadMoreRef.current, load: loadMoreImages } : null,
@@ -4326,6 +4433,10 @@
       setFolderReloadKey((current) => current + 1);
       setReloadKey((current) => current + 1);
     }, []);
+
+    const handleScrollAreaScroll = React.useCallback(() => {
+      scheduleMobileScrollMetrics();
+    }, [scheduleMobileScrollMetrics]);
 
     function openFileEntry(item) {
       const entry = item?.entry;
@@ -4900,24 +5011,21 @@
       );
     }
 
-    const showVideoSection = activeView === "all" || activeView === "video";
-    const showImageSection = activeView === "all" || activeView === "image";
-    const showOtherSection = activeView === "all" || activeView === "other";
+    const showVideoSection = activeView === "video";
+    const showImageSection = activeView === "image";
+    const showOtherSection = activeView === "other";
     const activeMediaCount = activeView === "video"
       ? `${visibleVideos.length}/${sceneTotal}`
       : activeView === "image"
         ? `${visibleImages.length}/${imageTotal}`
-        : activeView === "other"
-          ? `${otherEntryItems.length}`
-          : `共 ${visibleVideos.length + visibleImages.length + otherEntryItems.length}`;
+        : `${otherEntryItems.length}`;
     const activeViewEmpty =
       !loading &&
       !loadingEntries &&
       currentFolder &&
       ((activeView === "video" && visibleVideos.length === 0) ||
         (activeView === "image" && visibleImages.length === 0) ||
-        (activeView === "other" && otherEntryItems.length === 0) ||
-        (activeView === "all" && visibleVideos.length === 0 && visibleImages.length === 0 && otherEntryItems.length === 0));
+        (activeView === "other" && otherEntryItems.length === 0));
 
     function renderVideoSection() {
       if (!showVideoSection) return null;
@@ -4932,13 +5040,16 @@
           onSelectAllChange: toggleAllScenes,
         }),
         React.createElement(SceneWall, {
-          scenes: wallVideos,
+          scenes: renderVideoWindow.items,
           wallHeight: videoSizePreset.wallHeight,
           mobileColumns: isMobileLayout ? videoSizePreset.columns : undefined,
           fillTail: scenes.length >= sceneTotal,
           selectedIDs: selectedSceneIDs,
           touchPreviewSceneID,
           previewSceneIDs: previewVisibleSceneIDs,
+          topSpacer: renderVideoWindow.topSpacer,
+          bottomSpacer: renderVideoWindow.bottomSpacer,
+          innerRef: sceneWallRef,
           onBeforeOpen: (scene) => persistFolderState({ activeView: "video", lastOpenedSceneID: scene.id }),
           onSelectionChange: toggleSceneSelection,
           onContextMenu: (event, scene) => openMediaContextMenu(event, "video", scene),
@@ -4967,11 +5078,15 @@
           onSelectAllChange: toggleAllImages,
         }),
         React.createElement(ImageWall, {
-          items: wallImages,
+          items: renderImageWindow.items,
           wallHeight: imageSizePreset.wallHeight,
           mobileColumns: isMobileLayout ? imageSizePreset.columns : undefined,
           fillTail: images.length >= imageTotal,
           selectedIDs: selectedImageIDs,
+          startIndex: renderImageWindow.startIndex,
+          topSpacer: renderImageWindow.topSpacer,
+          bottomSpacer: renderImageWindow.bottomSpacer,
+          innerRef: imageWallRef,
           onOpen: openImagePreview,
           onSelectionChange: toggleImageSelection,
           onContextMenu: (event, item) => openMediaContextMenu(event, "image", item),
@@ -5096,6 +5211,7 @@
                 if (!event.target.closest?.(".folder-browser-wall-tile")) setTouchPreviewSceneID(null);
               },
               onScroll: () => {
+                handleScrollAreaScroll();
                 setContextMenu(null);
                 setMobileControlsOpen(false);
                 setTouchPreviewSceneID(null);

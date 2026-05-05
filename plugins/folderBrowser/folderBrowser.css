@@ -817,6 +817,13 @@
   gap: var(--folder-wall-gap, 4px);
 }
 
+.folder-browser-wall-spacer {
+  flex-basis: 100%;
+  flex-grow: 0;
+  pointer-events: none;
+  width: 100%;
+}
+
 .folder-browser-media-wall-fill-tail::after {
   content: "";
   flex-basis: 0;
@@ -2070,6 +2077,11 @@ body.folder-browser-lightbox-open {
     display: grid;
     gap: var(--folder-wall-gap, 4px);
     grid-template-columns: repeat(var(--folder-mobile-columns, 2), minmax(0, 1fr));
+  }
+
+  .folder-browser-wall-spacer {
+    grid-column: 1 / -1;
+    width: auto;
   }
 
   .folder-browser-media-wall-fill-tail::after {
