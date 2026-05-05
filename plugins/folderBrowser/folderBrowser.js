@@ -3,6 +3,7 @@
   if (!api) return;
 
   const React = api.React;
+  const ReactDOM = api.ReactDOM;
   const { Button, Form } = api.libraries.Bootstrap;
   const { Link, NavLink } = api.libraries.ReactRouterDOM;
   const { FontAwesomeIcon } = api.libraries.ReactFontAwesome;
@@ -2927,6 +2928,7 @@
         React.createElement(
           "button",
           {
+            type: "button",
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
             "data-folder-browser-image-id": item.imageID,
@@ -3514,7 +3516,7 @@
     const fingerprints = file?.fingerprints?.map((fingerprint) => `${fingerprint.type}: ${fingerprint.value}`) || [];
     const customFields = item.image?.custom_fields || {};
 
-    return React.createElement(
+    const lightbox = React.createElement(
       "div",
       { className: "folder-browser-lightbox" + (landscape ? " landscape" : ""), role: "dialog", "aria-modal": "true" },
       React.createElement("div", { className: "folder-browser-lightbox-backdrop" }),
@@ -3626,6 +3628,10 @@
         )
       )
     );
+
+    return ReactDOM?.createPortal
+      ? ReactDOM.createPortal(lightbox, document.body)
+      : lightbox;
   }
 
   function FolderBrowserPage() {
