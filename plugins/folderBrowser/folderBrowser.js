@@ -3594,7 +3594,8 @@
     const stickyRef = React.useRef(null);
     const scrollAreaRef = React.useRef(null);
     const mobileFolderTreeRef = React.useRef(null);
-    const loadMoreRef = React.useRef(null);
+    const sceneLoadMoreRef = React.useRef(null);
+    const imageLoadMoreRef = React.useRef(null);
     const [currentFolder, setCurrentFolder] = React.useState(savedState?.currentFolder ?? null);
     const [contentWidth, setContentWidth] = React.useState(0);
     const [folderTree, setFolderTree] = React.useState([]);
@@ -3898,18 +3899,26 @@
         try {
           const canQueryScannedMedia = currentFolder.id && !isPathOnlyFolder(currentFolder);
           const criterion = canQueryScannedMedia ? folderCriterion(currentFolder.id, includeChildren) : null;
+          const saved = savedStateRef.current;
+          const shouldRestoreContent =
+            restoreContentRef.current &&
+            saved?.currentFolderID === currentFolder.id;
+          const initialScenePage = shouldRestoreContent ? Math.max(1, saved.scenePage || 1) : 1;
+          const initialImagePage = shouldRestoreContent ? Math.max(1, saved.imagePage || 1) : 1;
+          const initialScenePageSize = scenePageSize * initialScenePage;
+          const initialImagePageSize = imagePageSize * initialImagePage;
           const [listingData, sceneData, imageData] = await Promise.all([
             callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentFolder.path }),
             canQueryScannedMedia
               ? callGQL(SCENES_QUERY, {
                   folderCriterion: criterion,
-                  mediaFilter: findFilter(sortState.key, sortState.direction, -1, 1),
+                  mediaFilter: findFilter(sortState.key, sortState.direction, initialScenePageSize, 1),
                 })
               : Promise.resolve({ findScenes: { count: 0, scenes: [] } }),
             canQueryScannedMedia
               ? callGQL(IMAGES_QUERY, {
                   folderCriterion: criterion,
-                  mediaFilter: findFilter(sortState.key, sortState.direction, -1, 1),
+                  mediaFilter: findFilter(sortState.key, sortState.direction, initialImagePageSize, 1),
                 })
               : Promise.resolve({ findImages: { count: 0, images: [] } }),
           ]);
@@ -3919,12 +3928,12 @@
             setImages(imageData.findImages.images ?? []);
             setSceneTotal(sceneData.findScenes.count ?? 0);
             setImageTotal(imageData.findImages.count ?? 0);
-            setScenePage(1);
-            setImagePage(1);
+            setScenePage(initialScenePage);
+            setImagePage(initialImagePage);
             restoreContentRef.current = false;
-            if (restoreScrollRef.current) {
+            if (shouldRestoreContent && restoreScrollRef.current) {
               restoreScrollRef.current = false;
-              restoreMediaIntoView(savedStateRef.current, savedStateRef.current?.scrollY || 0);
+              restoreMediaIntoView(saved, saved.scrollY || 0);
             }
           }
         } catch (e) {
@@ -3942,7 +3951,7 @@
       return () => {
         cancelled = true;
       };
-    }, [currentFolder, includeChildren, sortState, reloadKey]);
+    }, [currentFolder, includeChildren, sortState, scenePageSize, imagePageSize, reloadKey]);
 
     async function loadChildren(folder) {
       setFolderTree((current) =>
@@ -4275,24 +4284,26 @@
     }, [activeView, previewAllVisible, wallVideos.length, videoSizePreset.wallHeight]);
 
     React.useEffect(() => {
-      const node = loadMoreRef.current;
-      if (!node || !currentFolder) return undefined;
-      const canLoadVideos = activeView === "video" && scenes.length < sceneTotal && !loadingScenes;
-      const canLoadImages = activeView === "image" && images.length < imageTotal && !loadingImages;
-      if (!canLoadVideos && !canLoadImages) return undefined;
+      if (!currentFolder) return undefined;
+      const canLoadVideos = (activeView === "all" || activeView === "video") && scenes.length < sceneTotal && !loadingScenes;
+      const canLoadImages = (activeView === "all" || activeView === "image") && images.length < imageTotal && !loadingImages;
+      const targets = [
+        canLoadVideos && sceneLoadMoreRef.current ? { node: sceneLoadMoreRef.current, load: loadMoreScenes } : null,
+        canLoadImages && imageLoadMoreRef.current ? { node: imageLoadMoreRef.current, load: loadMoreImages } : null,
+      ].filter(Boolean);
+      if (!targets.length) return undefined;
 
       const observer = new IntersectionObserver(
         (entries) => {
-          if (!entries.some((entry) => entry.isIntersecting)) return;
-          if (activeView === "video") {
-            loadMoreScenes();
-          } else {
-            loadMoreImages();
-          }
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            const target = targets.find((item) => item.node === entry.target);
+            target?.load();
+          });
         },
         { root: scrollAreaRef.current, rootMargin: "700px 0px", threshold: 0.01 }
       );
-      observer.observe(node);
+      targets.forEach((target) => observer.observe(target.node));
       return () => observer.disconnect();
     }, [
       activeView,
@@ -4934,7 +4945,7 @@
           onTouchPreview: setTouchPreviewSceneID,
         }),
         React.createElement(AutoLoadMore, {
-          innerRef: showImageSection || showOtherSection ? undefined : loadMoreRef,
+          innerRef: sceneLoadMoreRef,
           disabled: false,
           loading: loadingScenes,
           remaining: Math.max(0, sceneTotal - scenes.length),
@@ -4966,7 +4977,7 @@
           onContextMenu: (event, item) => openMediaContextMenu(event, "image", item),
         }),
         React.createElement(AutoLoadMore, {
-          innerRef: showOtherSection ? undefined : loadMoreRef,
+          innerRef: imageLoadMoreRef,
           disabled: false,
           loading: loadingImages,
           remaining: Math.max(0, imageTotal - images.length),
