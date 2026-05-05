@@ -697,23 +697,49 @@
     return parts[parts.length - 1] || normalized;
   }
 
+  function parentPathForPath(path, basename = pathBasename(path)) {
+    const normalized = normalizePathKey(path);
+    if (!normalized || !basename || !normalized.endsWith(basename)) return "";
+    return normalized.slice(0, Math.max(0, normalized.length - basename.length)).replace(/[\\/]$/, "");
+  }
+
+  function pathOnlyParentFolders(path, explicitParentPath = "") {
+    const parents = [];
+    const seen = new Set();
+    let currentPath = normalizePathKey(explicitParentPath) || parentPathForPath(path);
+    while (currentPath && !seen.has(currentPath)) {
+      seen.add(currentPath);
+      const basename = pathBasename(currentPath);
+      parents.push({
+        id: `path:${currentPath}`,
+        path: currentPath,
+        basename,
+        parent_path: parentPathForPath(currentPath, basename),
+        parent_folders: [],
+        sub_folders: [{ id: `${currentPath}/child` }],
+      });
+      currentPath = parentPathForPath(currentPath, basename);
+    }
+    parents.forEach((parent, index) => {
+      parent.parent_folders = parents.slice(index + 1);
+    });
+    return parents;
+  }
+
   function folderFromEntry(entry) {
     return {
       id: `path:${entry.path}`,
       path: entry.path,
       basename: entry.basename || pathBasename(entry.path),
       parent_path: entry.parent_path,
-      parent_folders: [],
+      parent_folders: pathOnlyParentFolders(entry.path, entry.parent_path),
       sub_folders: [{ id: `${entry.path}/child` }],
     };
   }
 
   function folderParentPath(folder) {
     if (folder?.parent_path) return normalizePathKey(folder.parent_path);
-    const path = normalizePathKey(folder?.path);
-    const basename = folder?.basename || pathBasename(path);
-    if (!path || !basename || !path.endsWith(basename)) return "";
-    return path.slice(0, Math.max(0, path.length - basename.length)).replace(/[\\/]$/, "");
+    return parentPathForPath(folder?.path, folder?.basename || pathBasename(folder?.path));
   }
 
   function folderActionEntry(folder) {
