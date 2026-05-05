@@ -98,6 +98,7 @@
   flex-direction: column;
   left: calc(var(--folder-browser-sidebar-width) + 2rem);
   overflow: hidden;
+  overflow: clip;
   position: fixed;
   right: 1rem;
   top: 4.25rem;
@@ -264,6 +265,7 @@
 .folder-browser-pathbar {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: space-between;
   margin-bottom: 0;
@@ -292,7 +294,7 @@
 .folder-browser-breadcrumbs {
   align-items: center;
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 16rem;
   flex-wrap: nowrap;
   gap: 0;
   min-width: 0;
@@ -320,10 +322,12 @@
 .folder-browser-view-buttons {
   align-items: center;
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 22rem;
   flex-wrap: wrap;
   gap: 0.35rem;
   justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .folder-browser-sort-buttons {

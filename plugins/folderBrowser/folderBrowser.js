@@ -3761,6 +3761,17 @@
     }, [folderReloadKey, isMobileLayout, sidebarCollapsed, sidebarWidth]);
 
     React.useEffect(() => {
+      const node = contentRef.current;
+      if (!node) return undefined;
+      function resetHorizontalScroll() {
+        if (node.scrollLeft !== 0) node.scrollLeft = 0;
+      }
+      resetHorizontalScroll();
+      node.addEventListener("scroll", resetHorizontalScroll, { passive: true });
+      return () => node.removeEventListener("scroll", resetHorizontalScroll);
+    }, [isMobileLayout, sidebarCollapsed, sidebarWidth]);
+
+    React.useEffect(() => {
       function closeMenu() {
         setContextMenu(null);
       }

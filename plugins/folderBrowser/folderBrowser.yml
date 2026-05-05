@@ -1,6 +1,6 @@
 name: Folder Browser
 description: Adds a folder-first browser with mixed media previews and file management.
-version: 0.3.26
+version: 0.3.28
 ui:
   javascript:
     - folderBrowser.js
