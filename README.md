@@ -27,8 +27,8 @@ It is especially useful when:
 - Adds a `Folders` entry to the Stash navigation menu.
 - Shows a folder tree with expandable nested folders.
 - Opens folders into a media wall of videos or images.
-- Displays HEIC/HEIF images when Stash has scanned them, using the original on
-  Apple browsers and generated previews elsewhere.
+- Displays HEIC/HEIF images when Stash has scanned them, using generated
+  previews for viewing and preserving original downloads.
 - Supports including or excluding child folders.
 - Supports sorting, size presets, selection, move, rename, delete, and download
   actions for supported Stash media entries.

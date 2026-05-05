@@ -505,19 +505,9 @@
     return ["heic", "heif"].includes(fileFormat(file));
   }
 
-  function canDisplayHEIFOriginal() {
-    const ua = window.navigator?.userAgent || "";
-    const vendor = window.navigator?.vendor || "";
-    const platform = window.navigator?.platform || "";
-    const isApplePlatform = /iPhone|iPad|iPod|Mac/.test(platform) || /iPhone|iPad|iPod/.test(ua);
-    const isWebKit = /AppleWebKit/i.test(ua);
-    const isChromium = /Chrome|CriOS|Chromium|Edg|OPR|FxiOS/i.test(ua);
-    return isApplePlatform && isWebKit && !isChromium && /Apple/i.test(vendor || "Apple");
-  }
-
   function imageDisplayPath(image, file) {
     const paths = image?.paths || {};
-    if (isHEIFFile(file) && !canDisplayHEIFOriginal()) {
+    if (isHEIFFile(file)) {
       return paths.preview || paths.thumbnail || paths.image;
     }
     return paths.image || paths.preview || paths.thumbnail;
@@ -3596,9 +3586,10 @@
     }
 
     function downloadImageItem(item) {
-      if (!item?.full) return;
+      const url = item?.original || item?.full;
+      if (!url) return;
       const link = document.createElement("a");
-      link.href = item.full;
+      link.href = url;
       link.download = item.basename || item.title || "image";
       link.target = "_blank";
       document.body.appendChild(link);
