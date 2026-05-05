@@ -2385,7 +2385,9 @@
       orientationToggle.title = isLandscape ? "竖屏播放" : "横屏播放";
     }
     if (detailsToggle) {
-      detailsToggle.hidden = isLandscape;
+      detailsToggle.hidden = false;
+      detailsToggle.removeAttribute("hidden");
+      detailsToggle.setAttribute("aria-hidden", isLandscape ? "true" : "false");
     }
     if (isLandscape) {
       document.body?.classList.remove("folder-browser-scene-details-open");
