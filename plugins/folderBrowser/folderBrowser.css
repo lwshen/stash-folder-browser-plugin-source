@@ -532,6 +532,101 @@
   gap: 1rem;
 }
 
+.folder-browser-file-entry-grid {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--folder-browser-file-entry-min, 9.5rem), 1fr));
+}
+
+.folder-browser-file-entry {
+  -webkit-touch-callout: none;
+  align-content: start;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.35rem;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.45rem;
+  min-height: 10.5rem;
+  min-width: 0;
+  padding: 0.45rem;
+  text-align: left;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.folder-browser-file-entry:hover,
+.folder-browser-file-entry:focus-visible {
+  background: rgba(255, 255, 255, 0.095);
+  border-color: rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.folder-browser-file-entry-directory {
+  background: rgba(13, 110, 253, 0.11);
+  border-color: rgba(13, 110, 253, 0.24);
+}
+
+.folder-browser-file-entry-preview {
+  align-items: center;
+  aspect-ratio: 4 / 3;
+  background: #15171c;
+  border-radius: 0.25rem;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.folder-browser-file-entry-preview img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.folder-browser-file-entry-icon {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 0.5rem;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.folder-browser-file-entry-body {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.folder-browser-file-entry-name {
+  display: -webkit-box;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.25;
+  min-height: 2.1em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.folder-browser-file-entry-meta {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.73rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .folder-browser-scroll-area {
   flex: 1 1 auto;
   min-height: 0;
@@ -1869,6 +1964,29 @@ body.folder-browser-lightbox-open {
     -webkit-overflow-scrolling: touch;
     padding-bottom: 4rem;
     padding-right: 0;
+  }
+
+  .folder-browser-file-entry-grid {
+    gap: 0.42rem;
+    grid-template-columns: repeat(auto-fill, minmax(var(--folder-browser-file-entry-min, 7.4rem), 1fr));
+  }
+
+  .folder-browser-file-entry {
+    gap: 0.35rem;
+    min-height: 8rem;
+    padding: 0.35rem;
+  }
+
+  .folder-browser-file-entry-preview {
+    aspect-ratio: 1.08 / 1;
+  }
+
+  .folder-browser-file-entry-name {
+    font-size: 0.78rem;
+  }
+
+  .folder-browser-file-entry-meta {
+    font-size: 0.68rem;
   }
 
   .folder-browser-media-wall {

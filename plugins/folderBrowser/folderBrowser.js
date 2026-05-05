@@ -44,6 +44,8 @@
     { wallHeight: 128, columns: 3 },
     { wallHeight: 190, columns: 2 },
   ];
+  const DESKTOP_FILE_GRID_MIN_WIDTHS = ["8rem", "9.5rem", "11rem", "13rem"];
+  const MOBILE_FILE_GRID_MIN_WIDTHS = ["6.4rem", "7.4rem", "9.4rem"];
   const SORT_OPTIONS = [
     { key: "file_mod_time", label: "修改时间" },
     { key: "created_at", label: "入库时间" },
@@ -222,6 +224,76 @@
       findFolder(id: $folderID) {
         sub_folders { ${FOLDER_FIELDS} }
       }
+    }
+  `;
+
+  const FOLDER_LIST_ENTRIES_QUERY = `
+    query FolderBrowserListEntries($path: String) {
+      folderListEntries(path: $path) {
+        path
+        parent_path
+        entries {
+          path
+          basename
+          type
+          media_type
+          extension
+          size
+          mod_time
+        }
+      }
+    }
+  `;
+
+  const FOLDER_CREATE_MUTATION = `
+    mutation FolderBrowserFolderCreate($path: String!) {
+      folderCreate(path: $path) { path basename type media_type }
+    }
+  `;
+
+  const FOLDER_RENAME_MUTATION = `
+    mutation FolderBrowserFolderRename($path: String!, $basename: String!) {
+      folderRename(path: $path, basename: $basename) { path basename type media_type }
+    }
+  `;
+
+  const FOLDER_MOVE_MUTATION = `
+    mutation FolderBrowserFolderMove($path: String!, $destination: String!, $basename: String) {
+      folderMove(path: $path, destination_folder: $destination, destination_basename: $basename) {
+        path
+        basename
+        type
+        media_type
+      }
+    }
+  `;
+
+  const FOLDER_DELETE_MUTATION = `
+    mutation FolderBrowserFolderDelete($path: String!) {
+      folderDelete(path: $path)
+    }
+  `;
+
+  const FILE_RENAME_MUTATION = `
+    mutation FolderBrowserFileRename($path: String!, $basename: String!) {
+      fileRename(path: $path, basename: $basename) { path basename type media_type }
+    }
+  `;
+
+  const FILE_MOVE_MUTATION = `
+    mutation FolderBrowserFileMove($path: String!, $destination: String!, $basename: String) {
+      fileMove(path: $path, destination_folder: $destination, destination_basename: $basename) {
+        path
+        basename
+        type
+        media_type
+      }
+    }
+  `;
+
+  const FILE_DELETE_MUTATION = `
+    mutation FolderBrowserFileDelete($path: String!) {
+      fileDelete(path: $path)
     }
   `;
 
@@ -600,6 +672,84 @@
     return undefined;
   }
 
+  function findTreeNodeByPath(nodes, path) {
+    if (!path) return undefined;
+    for (const node of nodes) {
+      if (node.path === path) return node;
+      if (node.children) {
+        const found = findTreeNodeByPath(node.children, path);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  function isPathOnlyFolder(folder) {
+    return Boolean(folder?.id && String(folder.id).startsWith("path:"));
+  }
+
+  function normalizePathKey(path) {
+    return String(path || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  }
+
+  function pathBasename(path) {
+    const normalized = normalizePathKey(path);
+    if (!normalized) return "";
+    const parts = normalized.split("/");
+    return parts[parts.length - 1] || normalized;
+  }
+
+  function folderFromEntry(entry) {
+    return {
+      id: `path:${entry.path}`,
+      path: entry.path,
+      basename: entry.basename || pathBasename(entry.path),
+      parent_folders: [],
+      sub_folders: [{ id: `${entry.path}/child` }],
+    };
+  }
+
+  function joinFolderPath(parent, basename) {
+    const cleanParent = normalizePathKey(parent);
+    const cleanName = String(basename || "").replace(/^\/+|\/+$/g, "");
+    return cleanParent ? `${cleanParent}/${cleanName}` : cleanName;
+  }
+
+  function mediaTypeLabel(entry) {
+    if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") return "目录";
+    if (entry.media_type === "VIDEO") return "视频";
+    if (entry.media_type === "IMAGE") return "图片";
+    if (entry.media_type === "GALLERY") return "图库";
+    return "文件";
+  }
+
+  function fileEntrySortValue(entry, sortKey) {
+    if (sortKey === "filesize") return Number(entry.size) || 0;
+    if (sortKey === "file_mod_time" || sortKey === "created_at") return new Date(entry.mod_time || 0).getTime() || 0;
+    return String(entry.basename || entry.path || "").toLowerCase();
+  }
+
+  function sortFileEntries(entries, sortState) {
+    const direction = sortState.direction === "ASC" ? 1 : -1;
+    return [...(entries ?? [])].sort((a, b) => {
+      const aDir = a.type === "DIRECTORY" || a.media_type === "DIRECTORY";
+      const bDir = b.type === "DIRECTORY" || b.media_type === "DIRECTORY";
+      if (aDir !== bDir) return aDir ? -1 : 1;
+      const aValue = fileEntrySortValue(a, sortState.key);
+      const bValue = fileEntrySortValue(b, sortState.key);
+      if (typeof aValue === "number" && typeof bValue === "number") return (aValue - bValue) * direction;
+      return String(aValue).localeCompare(String(bValue), undefined, { sensitivity: "base", numeric: true }) * direction;
+    });
+  }
+
+  function friendlyFileApiError(error) {
+    const message = error?.message || String(error || "");
+    if (message.includes("delete_trash_path")) {
+      return "需要先配置回收站路径，才能通过 Folder Browser 删除文件。";
+    }
+    return message;
+  }
+
   function expandedFolderIDs(nodes) {
     const ids = [];
     function walk(items) {
@@ -803,19 +953,21 @@
       React.createElement(
         "div",
         { className: "folder-browser-view-buttons" },
-        React.createElement(
-          "label",
-          { className: "folder-browser-media-summary" },
-          React.createElement("input", {
-            type: "checkbox",
-            checked: allSelected,
-            ref: (input) => {
-              if (input) input.indeterminate = Boolean(someSelected && !allSelected);
-            },
-            onChange: (event) => onSelectAllChange?.(event.target.checked),
-          }),
-          React.createElement("span", null, `全选 ${mediaCount}`)
-        ),
+        onSelectAllChange
+          ? React.createElement(
+              "label",
+              { className: "folder-browser-media-summary" },
+              React.createElement("input", {
+                type: "checkbox",
+                checked: allSelected,
+                ref: (input) => {
+                  if (input) input.indeterminate = Boolean(someSelected && !allSelected);
+                },
+                onChange: (event) => onSelectAllChange(event.target.checked),
+              }),
+              React.createElement("span", null, `全选 ${mediaCount}`)
+            )
+          : React.createElement("span", { className: "folder-browser-media-summary" }, mediaCount),
         React.createElement(
           "div",
           { className: "folder-browser-sort-buttons" },
@@ -868,6 +1020,15 @@
           Button,
           {
             size: "sm",
+            variant: activeView === "all" ? "primary" : "secondary",
+            onClick: () => onActiveViewChange("all"),
+          },
+          "全部"
+        ),
+        React.createElement(
+          Button,
+          {
+            size: "sm",
             variant: activeView === "video" ? "primary" : "secondary",
             onClick: () => onActiveViewChange("video"),
           },
@@ -881,6 +1042,15 @@
             onClick: () => onActiveViewChange("image"),
           },
           "图片"
+        ),
+        React.createElement(
+          Button,
+          {
+            size: "sm",
+            variant: activeView === "other" ? "primary" : "secondary",
+            onClick: () => onActiveViewChange("other"),
+          },
+          "其他"
         )
       )
     );
@@ -915,6 +1085,7 @@
     previewAllVisible,
     sizeIndex,
     onOpenFolders,
+    onCreateFolder,
     onControlsToggle,
     controlsOpen,
     onActiveViewChange,
@@ -949,6 +1120,11 @@
           { className: "folder-browser-mobile-view-switch folder-browser-mobile-control-cluster" },
           React.createElement(
             Button,
+            { size: "sm", variant: activeView === "all" ? "primary" : "secondary", onClick: () => onActiveViewChange("all") },
+            "全部"
+          ),
+          React.createElement(
+            Button,
             { size: "sm", variant: activeView === "video" ? "primary" : "secondary", onClick: () => onActiveViewChange("video") },
             "视频"
           ),
@@ -956,6 +1132,11 @@
             Button,
             { size: "sm", variant: activeView === "image" ? "primary" : "secondary", onClick: () => onActiveViewChange("image") },
             "图片"
+          ),
+          React.createElement(
+            Button,
+            { size: "sm", variant: activeView === "other" ? "primary" : "secondary", onClick: () => onActiveViewChange("other") },
+            "其他"
           )
         ),
         React.createElement("span", { className: "folder-browser-mobile-divider" }),
@@ -1026,6 +1207,16 @@
                       `${option.label}${sortState.key === option.key ? (sortState.direction === "DESC" ? "↓" : "↑") : ""}`
                     )
                   )
+                )
+              ),
+              React.createElement(
+                "div",
+                { className: "folder-browser-mobile-control-group" },
+                React.createElement("span", null, "文件"),
+                React.createElement(
+                  "div",
+                  { className: "folder-browser-mobile-chip-row" },
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录")
                 )
               )
             )
@@ -2663,6 +2854,103 @@
     );
   }
 
+  function FileEntryTile({ item, onOpen, onContextMenu }) {
+    const longPressRef = React.useRef(null);
+    const longPressTriggeredRef = React.useRef(false);
+    const entry = item.entry;
+    const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+    const scene = item.scene;
+    const image = item.imageItem;
+    const preview = image?.thumb || scene?.paths?.screenshot;
+    const title = entry.basename || pathBasename(entry.path);
+    const meta = [
+      mediaTypeLabel(entry),
+      isDirectory ? "" : formatBytes(entry.size),
+      entry.mod_time ? formatDateTime(entry.mod_time) : "",
+    ].filter(Boolean).join(" · ");
+
+    function clearLongPress() {
+      if (!longPressRef.current) return;
+      window.clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+
+    function onPointerDown(event) {
+      if (!touchPreviewEnabled || event.pointerType === "mouse") return;
+      longPressTriggeredRef.current = false;
+      clearLongPress();
+      const pressEvent = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      };
+      longPressRef.current = window.setTimeout(() => {
+        longPressTriggeredRef.current = true;
+        onContextMenu(pressEvent, item);
+      }, 520);
+    }
+
+    function onPointerUp() {
+      clearLongPress();
+    }
+
+    function onClick(event) {
+      if (longPressTriggeredRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        longPressTriggeredRef.current = false;
+        return;
+      }
+      onOpen(item);
+    }
+
+    return React.createElement(
+      "button",
+      {
+        className: `folder-browser-file-entry folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}`,
+        title: entry.path,
+        onClick,
+        onContextMenu: (event) => onContextMenu(event, item),
+        onPointerDown,
+        onPointerUp,
+        onPointerCancel: onPointerUp,
+        onPointerLeave: onPointerUp,
+      },
+      React.createElement(
+        "span",
+        { className: "folder-browser-file-entry-preview" },
+        preview
+          ? React.createElement("img", { src: preview, alt: title, loading: "lazy" })
+          : React.createElement("span", { className: "folder-browser-file-entry-icon" }, isDirectory ? "DIR" : (entry.extension || entry.media_type || "FILE"))
+      ),
+      React.createElement(
+        "span",
+        { className: "folder-browser-file-entry-body" },
+        React.createElement("span", { className: "folder-browser-file-entry-name" }, title),
+        React.createElement("span", { className: "folder-browser-file-entry-meta" }, meta)
+      )
+    );
+  }
+
+  function FileEntryGrid({ items, minWidth, onOpen, onContextMenu }) {
+    return React.createElement(
+      "div",
+      {
+        className: "folder-browser-file-entry-grid",
+        style: minWidth ? { "--folder-browser-file-entry-min": minWidth } : undefined,
+      },
+      items.map((item) =>
+        React.createElement(FileEntryTile, {
+          key: item.entry.path,
+          item,
+          onOpen,
+          onContextMenu,
+        })
+      )
+    );
+  }
+
   function ContextMenu({ menu, onDownload, onRename, onMove, onDelete, onClose }) {
     if (!menu) return null;
 
@@ -2678,6 +2966,19 @@
           },
         },
         label
+      );
+    }
+
+    if (menu.actions) {
+      return React.createElement(
+        "div",
+        {
+          className: "folder-browser-context-menu",
+          style: { left: menu.x, top: menu.y },
+          onClick: (event) => event.stopPropagation(),
+          onContextMenu: (event) => event.preventDefault(),
+        },
+        menu.actions.map((action) => item(action.label, action.onClick, action))
       );
     }
 
@@ -2706,6 +3007,7 @@
     onMove,
     onDelete,
     onClear,
+    onCreateFolder,
   }) {
     return React.createElement(
       "div",
@@ -2714,6 +3016,7 @@
       React.createElement(
         "div",
         { className: "folder-browser-toolbar-buttons" },
+        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount !== 1, onClick: onRename }, "重命名"),
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedCount, onClick: onMove }, "移动"),
@@ -3226,6 +3529,7 @@
     const [currentFolder, setCurrentFolder] = React.useState(savedState?.currentFolder ?? null);
     const [contentWidth, setContentWidth] = React.useState(0);
     const [folderTree, setFolderTree] = React.useState([]);
+    const [folderEntries, setFolderEntries] = React.useState([]);
     const [scenes, setScenes] = React.useState([]);
     const [images, setImages] = React.useState([]);
     const [sceneTotal, setSceneTotal] = React.useState(0);
@@ -3233,7 +3537,7 @@
     const [scenePage, setScenePage] = React.useState(0);
     const [imagePage, setImagePage] = React.useState(0);
     const [includeChildren, setIncludeChildren] = React.useState(savedState?.includeChildren ?? true);
-    const [activeView, setActiveView] = React.useState(savedState?.activeView ?? "video");
+    const [activeView, setActiveView] = React.useState(["all", "video", "image", "other"].includes(savedState?.activeView) ? savedState.activeView : "all");
     const [sortState, setSortState] = React.useState(savedState?.sortState ?? { key: "created_at", direction: "DESC" });
     const [videoSizeIndex, setVideoSizeIndex] = React.useState(savedState?.videoSizeIndex ?? savedState?.sizeIndex ?? 2);
     const [imageSizeIndex, setImageSizeIndex] = React.useState(savedState?.imageSizeIndex ?? Math.min(3, (savedState?.sizeIndex ?? 2) + 1));
@@ -3259,6 +3563,7 @@
     const [loading, setLoading] = React.useState(false);
     const [loadingScenes, setLoadingScenes] = React.useState(false);
     const [loadingImages, setLoadingImages] = React.useState(false);
+    const [loadingEntries, setLoadingEntries] = React.useState(false);
     const [error, setError] = React.useState("");
 
     React.useEffect(() => {
@@ -3386,6 +3691,7 @@
 
     const openRoot = React.useCallback(() => {
       setCurrentFolder(null);
+      setFolderEntries([]);
       setScenes([]);
       setImages([]);
       setSceneTotal(0);
@@ -3420,9 +3726,14 @@
             if (!cancelled) {
               setFolderTree(restoredTree);
               const savedFolderID = savedStateRef.current?.currentFolderID || savedStateRef.current?.currentFolder?.id;
+              const savedFolder = savedStateRef.current?.currentFolder;
               const restoredFolder = savedFolderID ? findTreeNode(restoredTree, savedFolderID) : null;
               if (restoredFolder) setCurrentFolder(restoredFolder);
-              if (!restoredFolder && restoredTree[0]) {
+              const restoredPathOnlyFolder = !restoredFolder && isPathOnlyFolder(savedFolder) && savedFolder?.path;
+              if (restoredPathOnlyFolder) {
+                setCurrentFolder(savedFolder);
+              }
+              if (!restoredFolder && !restoredPathOnlyFolder && restoredTree[0]) {
                 setCurrentFolder(restoredTree[0]);
                 setIncludeChildren(true);
               }
@@ -3438,7 +3749,7 @@
       return () => {
         cancelled = true;
       };
-    }, []);
+    }, [folderReloadKey]);
 
     const videoSizePreset = isMobileLayout
       ? MOBILE_VIDEO_SIZE_PRESETS[mobileVideoSizeIndex] || MOBILE_VIDEO_SIZE_PRESETS[1]
@@ -3481,6 +3792,7 @@
 
     React.useEffect(() => {
       if (!currentFolder) {
+        setFolderEntries([]);
         setScenes([]);
         setImages([]);
         setSceneTotal(0);
@@ -3495,9 +3807,11 @@
       let cancelled = false;
       async function loadInitialContent() {
         setLoading(true);
+        setLoadingEntries(true);
         setLoadingScenes(true);
         setLoadingImages(true);
         setError("");
+        setFolderEntries([]);
         setScenes([]);
         setImages([]);
         setSceneTotal(0);
@@ -3507,43 +3821,43 @@
         setSelectedSceneIDs([]);
         setSelectedImageIDs([]);
         try {
-          const saved = savedStateRef.current;
-          const shouldRestoreContent =
-            restoreContentRef.current &&
-            saved?.currentFolderID === currentFolder.id;
-          const initialScenePage = shouldRestoreContent ? Math.max(1, saved.scenePage || 1) : 1;
-          const initialImagePage = shouldRestoreContent ? Math.max(1, saved.imagePage || 1) : 1;
-          const initialScenePageSize = scenePageSize * initialScenePage;
-          const initialImagePageSize = imagePageSize * initialImagePage;
-          const criterion = folderCriterion(currentFolder.id, includeChildren);
-          const [sceneData, imageData] = await Promise.all([
-            callGQL(SCENES_QUERY, {
-              folderCriterion: criterion,
-              mediaFilter: findFilter(sortState.key, sortState.direction, initialScenePageSize, 1),
-            }),
-            callGQL(IMAGES_QUERY, {
-              folderCriterion: criterion,
-              mediaFilter: findFilter(sortState.key, sortState.direction, initialImagePageSize, 1),
-            }),
+          const canQueryScannedMedia = currentFolder.id && !isPathOnlyFolder(currentFolder);
+          const criterion = canQueryScannedMedia ? folderCriterion(currentFolder.id, false) : null;
+          const [listingData, sceneData, imageData] = await Promise.all([
+            callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentFolder.path }),
+            canQueryScannedMedia
+              ? callGQL(SCENES_QUERY, {
+                  folderCriterion: criterion,
+                  mediaFilter: findFilter(sortState.key, sortState.direction, -1, 1),
+                })
+              : Promise.resolve({ findScenes: { count: 0, scenes: [] } }),
+            canQueryScannedMedia
+              ? callGQL(IMAGES_QUERY, {
+                  folderCriterion: criterion,
+                  mediaFilter: findFilter(sortState.key, sortState.direction, -1, 1),
+                })
+              : Promise.resolve({ findImages: { count: 0, images: [] } }),
           ]);
           if (!cancelled) {
+            setFolderEntries(listingData.folderListEntries?.entries ?? []);
             setScenes(sceneData.findScenes.scenes ?? []);
             setImages(imageData.findImages.images ?? []);
             setSceneTotal(sceneData.findScenes.count ?? 0);
             setImageTotal(imageData.findImages.count ?? 0);
-            setScenePage(initialScenePage);
-            setImagePage(initialImagePage);
+            setScenePage(1);
+            setImagePage(1);
             restoreContentRef.current = false;
-            if (shouldRestoreContent && restoreScrollRef.current) {
+            if (restoreScrollRef.current) {
               restoreScrollRef.current = false;
-              restoreMediaIntoView(saved, saved.scrollY || 0);
+              restoreMediaIntoView(savedStateRef.current, savedStateRef.current?.scrollY || 0);
             }
           }
         } catch (e) {
-          if (!cancelled) setError(e.message || String(e));
+          if (!cancelled) setError(friendlyFileApiError(e));
         } finally {
           if (!cancelled) {
             setLoading(false);
+            setLoadingEntries(false);
             setLoadingScenes(false);
             setLoadingImages(false);
           }
@@ -3553,7 +3867,7 @@
       return () => {
         cancelled = true;
       };
-    }, [currentFolder, includeChildren, sortState, scenePageSize, imagePageSize, reloadKey]);
+    }, [currentFolder, sortState, reloadKey]);
 
     async function loadChildren(folder) {
       setFolderTree((current) =>
@@ -3581,6 +3895,18 @@
 
     function onSelectFolder(folder) {
       setCurrentFolder(findTreeNode(folderTree, folder.id) || folder);
+      if (isMobileLayout) {
+        setMobileFoldersOpen(false);
+        setMobileControlsOpen(false);
+      }
+    }
+
+    function selectFolderByPath(path, fallbackEntry = null) {
+      const existing = findTreeNodeByPath(folderTree, path);
+      setCurrentFolder(existing || folderFromEntry(fallbackEntry || { path, basename: pathBasename(path) }));
+      setSelectedSceneIDs([]);
+      setSelectedImageIDs([]);
+      setLightboxIndex(null);
       if (isMobileLayout) {
         setMobileFoldersOpen(false);
         setMobileControlsOpen(false);
@@ -3655,6 +3981,49 @@
       [scenes]
     );
     const pictures = React.useMemo(() => imageItems(images), [images]);
+    const sceneByPath = React.useMemo(() => {
+      const map = new Map();
+      videos.forEach((scene) => {
+        const file = primarySceneFile(scene);
+        if (file?.path) map.set(normalizePathKey(file.path), scene);
+      });
+      return map;
+    }, [videos]);
+    const imageByPath = React.useMemo(() => {
+      const map = new Map();
+      pictures.forEach((item) => {
+        if (item.path) map.set(normalizePathKey(item.path), item);
+      });
+      return map;
+    }, [pictures]);
+    const fileEntryItems = React.useMemo(
+      () =>
+        sortFileEntries(folderEntries, sortState).map((entry) => ({
+          entry,
+          scene: sceneByPath.get(normalizePathKey(entry.path)),
+          imageItem: imageByPath.get(normalizePathKey(entry.path)),
+        })),
+      [folderEntries, imageByPath, sceneByPath, sortState]
+    );
+    const visibleFileEntryItems = React.useMemo(
+      () =>
+        fileEntryItems.filter((item) => {
+          const entry = item.entry;
+          const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+          if (isDirectory || activeView === "all") return true;
+          if (activeView === "video") return entry.media_type === "VIDEO";
+          if (activeView === "image") return entry.media_type === "IMAGE";
+          return !["VIDEO", "IMAGE", "DIRECTORY"].includes(entry.media_type);
+        }),
+      [activeView, fileEntryItems]
+    );
+    const lightboxImages = React.useMemo(
+      () => fileEntryItems.map((item) => item.imageItem).filter(Boolean),
+      [fileEntryItems]
+    );
+    const fileGridMinWidth = isMobileLayout
+      ? MOBILE_FILE_GRID_MIN_WIDTHS[activeSizeIndex] || MOBILE_FILE_GRID_MIN_WIDTHS[1]
+      : DESKTOP_FILE_GRID_MIN_WIDTHS[activeSizeIndex] || DESKTOP_FILE_GRID_MIN_WIDTHS[2];
     const visibleVideos = React.useMemo(
       () => videos,
       [videos]
@@ -3748,33 +4117,33 @@
     }
 
     const openImagePreview = React.useCallback((index) => {
-      const item = wallImages[index];
+      const item = lightboxImages[index];
       if (item) persistFolderState({ activeView: "image", lastOpenedImageID: item.imageID });
       setLightboxIndex(index);
-    }, [persistFolderState, wallImages]);
+    }, [lightboxImages, persistFolderState]);
 
     const closeImagePreview = React.useCallback(() => {
-      const item = lightboxIndex === null ? null : wallImages[lightboxIndex];
+      const item = lightboxIndex === null ? null : lightboxImages[lightboxIndex];
       if (item) persistFolderState({ activeView: "image", lastOpenedImageID: item.imageID });
       setLightboxIndex(null);
       if (item) scrollImageIntoView(item.imageID);
-    }, [lightboxIndex, persistFolderState, wallImages]);
+    }, [lightboxIndex, lightboxImages, persistFolderState]);
 
     const moveLightbox = React.useCallback(
       (delta) => {
         setLightboxIndex((current) => {
-          if (current === null || wallImages.length === 0) return null;
-          return (current + delta + wallImages.length) % wallImages.length;
+          if (current === null || lightboxImages.length === 0) return null;
+          return (current + delta + lightboxImages.length) % lightboxImages.length;
         });
       },
-      [wallImages.length]
+      [lightboxImages.length]
     );
 
     React.useEffect(() => {
-      if (lightboxIndex !== null && lightboxIndex >= wallImages.length) {
-        setLightboxIndex(wallImages.length ? wallImages.length - 1 : null);
+      if (lightboxIndex !== null && lightboxIndex >= lightboxImages.length) {
+        setLightboxIndex(lightboxImages.length ? lightboxImages.length - 1 : null);
       }
-    }, [lightboxIndex, wallImages.length]);
+    }, [lightboxIndex, lightboxImages.length]);
 
     React.useEffect(() => {
       if (!previewAllVisible || activeView !== "video" || !wallVideos.length) {
@@ -3850,6 +4219,142 @@
     const refreshContent = React.useCallback(() => {
       setReloadKey((current) => current + 1);
     }, []);
+
+    const refreshFoldersAndContent = React.useCallback(() => {
+      setFolderReloadKey((current) => current + 1);
+      setReloadKey((current) => current + 1);
+    }, []);
+
+    function openFileEntry(item) {
+      const entry = item?.entry;
+      if (!entry) return;
+      if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+        selectFolderByPath(entry.path, entry);
+        return;
+      }
+      if (item.scene?.id) {
+        persistFolderState({ lastOpenedSceneID: item.scene.id });
+        window.location.assign(`${baseURL.replace(/\/$/, "")}/scenes/${item.scene.id}?${SCENE_RETURN_PARAM}=1`);
+        return;
+      }
+      if (item.imageItem?.imageID) {
+        const index = lightboxImages.findIndex((image) => image.imageID === item.imageItem.imageID);
+        if (index >= 0) openImagePreview(index);
+      }
+    }
+
+    async function createFolderAt(path) {
+      const basename = window.prompt("新目录名");
+      if (!basename) return;
+      setLoading(true);
+      setError("");
+      try {
+        await callGQL(FOLDER_CREATE_MUTATION, { path: joinFolderPath(path, basename) });
+        refreshFoldersAndContent();
+      } catch (e) {
+        setError(friendlyFileApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function renameFileEntry(item) {
+      const entry = item?.entry;
+      if (!entry) return;
+      const basename = window.prompt("新的名称", entry.basename || pathBasename(entry.path));
+      if (!basename || basename === entry.basename) return;
+      setLoading(true);
+      setError("");
+      try {
+        if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+          await callGQL(FOLDER_RENAME_MUTATION, { path: entry.path, basename });
+          if (currentFolder?.path === entry.path) selectFolderByPath(joinFolderPath(entry.parent_path || "", basename));
+          refreshFoldersAndContent();
+        } else {
+          await callGQL(FILE_RENAME_MUTATION, { path: entry.path, basename });
+          refreshContent();
+        }
+      } catch (e) {
+        setError(friendlyFileApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function moveFileEntry(item) {
+      const entry = item?.entry;
+      if (!entry) return;
+      const destination = window.prompt("目标目录路径", currentFolder?.path || entry.parent_path || "");
+      if (!destination) return;
+      const basename = window.prompt("新名称（留空保持原名）", "");
+      setLoading(true);
+      setError("");
+      try {
+        if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+          await callGQL(FOLDER_MOVE_MUTATION, {
+            path: entry.path,
+            destination,
+            basename: basename || null,
+          });
+          refreshFoldersAndContent();
+        } else {
+          await callGQL(FILE_MOVE_MUTATION, {
+            path: entry.path,
+            destination,
+            basename: basename || null,
+          });
+          refreshContent();
+        }
+      } catch (e) {
+        setError(friendlyFileApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function deleteFileEntry(item) {
+      const entry = item?.entry;
+      if (!entry) return;
+      const label = entry.basename || pathBasename(entry.path);
+      const confirmed = window.confirm(`删除 ${label}？需要先在 Stash 配置回收站路径。`);
+      if (!confirmed) return;
+      setLoading(true);
+      setError("");
+      try {
+        if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+          await callGQL(FOLDER_DELETE_MUTATION, { path: entry.path });
+          refreshFoldersAndContent();
+        } else {
+          await callGQL(FILE_DELETE_MUTATION, { path: entry.path });
+          refreshContent();
+        }
+      } catch (e) {
+        setError(friendlyFileApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function openFileEntryContextMenu(event, item) {
+      event.preventDefault();
+      event.stopPropagation();
+      const entry = item?.entry;
+      const isDirectory = entry?.type === "DIRECTORY" || entry?.media_type === "DIRECTORY";
+      const canOpen = isDirectory || item?.scene || item?.imageItem;
+      setContextMenu({
+        kind: "entry",
+        item,
+        x: Math.min(event.clientX, window.innerWidth - 190),
+        y: Math.min(event.clientY, window.innerHeight - 230),
+        actions: [
+          { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
+          ...(isDirectory ? [{ label: "新建目录", onClick: () => createFolderAt(entry.path) }] : []),
+          { label: "移动", onClick: () => moveFileEntry(item) },
+          { label: "重命名", onClick: () => renameFileEntry(item) },
+          { label: "删除", danger: true, onClick: () => deleteFileEntry(item) },
+        ],
+      });
+    }
 
     function downloadSelectedImages() {
       selectedImages.forEach((item) => {
@@ -4048,24 +4553,21 @@
 
     async function deleteImageItem(item) {
       if (!item) return;
-      const confirmed = window.confirm(`删除 ${item.basename || item.title} 及其文件？这个操作会修改 NAS 上的实际文件。`);
+      if (!item.path) {
+        setError("找不到图片文件路径，无法删除。");
+        return;
+      }
+      const confirmed = window.confirm(`删除 ${item.basename || item.title}？需要先在 Stash 配置回收站路径。`);
       if (!confirmed) return;
       setLoadingImages(true);
       setError("");
       try {
-        await callGQL(IMAGES_DESTROY_MUTATION, {
-          input: {
-            ids: [item.imageID],
-            delete_file: true,
-            delete_generated: true,
-            destroy_file_entry: true,
-          },
-        });
+        await callGQL(FILE_DELETE_MUTATION, { path: item.path });
         setSelectedImageIDs((current) => current.filter((id) => id !== item.imageID));
-        if (wallImages.length <= 1) setLightboxIndex(null);
+        if (lightboxImages.length <= 1) setLightboxIndex(null);
         refreshContent();
       } catch (e) {
-        setError(e.message || String(e));
+        setError(friendlyFileApiError(e));
       } finally {
         setLoadingImages(false);
       }
@@ -4251,6 +4753,7 @@
           onMove: moveSelectedMedia,
           onDelete: deleteSelectedMedia,
           onClear: clearSelection,
+          onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
         }),
         React.createElement(
           "div",
@@ -4323,7 +4826,7 @@
               ? React.createElement(MobileToolbar, {
                   currentFolder,
                   activeView,
-                  mediaCount: activeView === "video" ? `${wallVideos.length}/${sceneTotal}` : `${wallImages.length}/${imageTotal}`,
+                  mediaCount: `${visibleFileEntryItems.length}/${fileEntryItems.length}`,
                   sortState,
                   includeChildren,
                   previewAllVisible,
@@ -4331,6 +4834,7 @@
                   controlsOpen: mobileControlsOpen,
                   onControlsToggle: () => setMobileControlsOpen((current) => !current),
                   onOpenFolders: () => setMobileFoldersOpen(true),
+                  onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
                   onActiveViewChange: setActiveView,
                   onSortChange,
                   onSizeChange: onActiveSizeChange,
@@ -4345,10 +4849,10 @@
                   sizeIndex: activeSizeIndex,
                   sizeMax: activeSizeMax,
                   previewAllVisible,
-                  mediaCount: activeView === "video" ? `${wallVideos.length}/${sceneTotal}` : `${wallImages.length}/${imageTotal}`,
+                  mediaCount: `${visibleFileEntryItems.length}/${fileEntryItems.length}`,
                   allSelected: activeView === "video" ? allWallVideosSelected : allWallImagesSelected,
                   someSelected: activeView === "video" ? someWallVideosSelected : someWallImagesSelected,
-                  onSelectAllChange: activeView === "video" ? toggleAllScenes : toggleAllImages,
+                  onSelectAllChange: activeView === "video" ? toggleAllScenes : activeView === "image" ? toggleAllImages : undefined,
                   onIncludeChildrenChange: setIncludeChildren,
                   onActiveViewChange: setActiveView,
                   onSortChange,
@@ -4374,63 +4878,23 @@
             React.createElement(
               "div",
               { className: "folder-browser-sections" },
-              activeView === "video"
-                ? React.createElement(
-                    React.Fragment,
-                    null,
-                    React.createElement(SceneWall, {
-                      scenes: wallVideos,
-                      wallHeight: videoSizePreset.wallHeight,
-                      mobileColumns: isMobileLayout ? videoSizePreset.columns : undefined,
-                      fillTail: scenes.length >= sceneTotal,
-                      selectedIDs: selectedSceneIDs,
-                      touchPreviewSceneID,
-                      previewSceneIDs: previewVisibleSceneIDs,
-                      onBeforeOpen: (scene) => persistFolderState({ lastOpenedSceneID: scene.id }),
-                      onSelectionChange: toggleSceneSelection,
-                      onContextMenu: (event, scene) => openMediaContextMenu(event, "video", scene),
-                      onTouchPreview: setTouchPreviewSceneID,
-                    }),
-                    React.createElement(AutoLoadMore, {
-                      innerRef: loadMoreRef,
-                      disabled: false,
-                      loading: loadingScenes,
-                      remaining: Math.max(0, sceneTotal - scenes.length),
-                      onLoad: loadMoreScenes,
-                    })
-                  )
-                : React.createElement(
-                    React.Fragment,
-                    null,
-                    React.createElement(ImageWall, {
-                      items: wallImages,
-                      wallHeight: imageSizePreset.wallHeight,
-                      mobileColumns: isMobileLayout ? imageSizePreset.columns : undefined,
-                      fillTail: images.length >= imageTotal,
-                      selectedIDs: selectedImageIDs,
-                      onOpen: openImagePreview,
-                      onSelectionChange: toggleImageSelection,
-                      onContextMenu: (event, item) => openMediaContextMenu(event, "image", item),
-                    }),
-                    React.createElement(AutoLoadMore, {
-                      innerRef: loadMoreRef,
-                      disabled: false,
-                      loading: loadingImages,
-                      remaining: Math.max(0, imageTotal - images.length),
-                      onLoad: loadMoreImages,
-                    })
-                  )
+              React.createElement(FileEntryGrid, {
+                items: visibleFileEntryItems,
+                minWidth: fileGridMinWidth,
+                onOpen: openFileEntry,
+                onContextMenu: openFileEntryContextMenu,
+              })
             ),
-            !loading && ((activeView === "video" && visibleVideos.length === 0) || (activeView === "image" && visibleImages.length === 0))
+            !loading && !loadingEntries && visibleFileEntryItems.length === 0
               ? React.createElement(
                   "div",
                   { className: "folder-browser-empty" },
-                  currentFolder ? (activeView === "video" ? "This folder has no scanned scenes." : "This folder has no scanned images.") : "No library folders found."
+                  currentFolder ? "当前目录没有可显示条目。" : "No library folders found."
                 )
               : null
           ),
           React.createElement(ImageLightbox, {
-            items: wallImages,
+            items: lightboxImages,
             index: lightboxIndex,
             playing: slideshow,
             onClose: () => {
