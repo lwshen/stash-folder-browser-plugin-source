@@ -1085,26 +1085,26 @@
           },
           "视频"
         ),
-        React.createElement(
-          Button,
-          {
-            size: "sm",
-            variant: activeView === "image" ? "primary" : "secondary",
-            onClick: () => onActiveViewChange("image"),
-          },
-          "图片"
-        ),
-        React.createElement(
-          Button,
-          {
-            size: "sm",
-            variant: activeView === "other" ? "primary" : "secondary",
-            onClick: () => onActiveViewChange("other"),
-          },
-          "其他"
+          React.createElement(
+            Button,
+            {
+              size: "sm",
+              variant: activeView === "image" ? "primary" : "secondary",
+              onClick: () => onActiveViewChange("image"),
+            },
+            "图片"
+          ),
+          React.createElement(
+            Button,
+            {
+              size: "sm",
+              variant: activeView === "other" ? "primary" : "secondary",
+              onClick: () => onActiveViewChange("other"),
+            },
+            "其他"
+          )
         )
-      )
-    );
+      );
   }
 
   function MediaViewHeader({ title, count, checked, indeterminate, onSelectAllChange }) {
@@ -3005,6 +3005,10 @@
   function ContextMenu({ menu, onDownload, onRename, onMove, onDelete, onClose }) {
     if (!menu) return null;
 
+    function stopMenuEvent(event) {
+      event.stopPropagation();
+    }
+
     function item(label, onClick, options = {}) {
       return React.createElement(
         "button",
@@ -3026,7 +3030,13 @@
         {
           className: "folder-browser-context-menu",
           style: { left: menu.x, top: menu.y },
-          onClick: (event) => event.stopPropagation(),
+          onPointerDown: stopMenuEvent,
+          onPointerMove: stopMenuEvent,
+          onMouseDown: stopMenuEvent,
+          onMouseMove: stopMenuEvent,
+          onMouseOver: stopMenuEvent,
+          onTouchStart: stopMenuEvent,
+          onClick: stopMenuEvent,
           onContextMenu: (event) => event.preventDefault(),
         },
         menu.actions.map((action) => item(action.label, action.onClick, action))
@@ -3038,7 +3048,13 @@
       {
         className: "folder-browser-context-menu",
         style: { left: menu.x, top: menu.y },
-        onClick: (event) => event.stopPropagation(),
+        onPointerDown: stopMenuEvent,
+        onPointerMove: stopMenuEvent,
+        onMouseDown: stopMenuEvent,
+        onMouseMove: stopMenuEvent,
+        onMouseOver: stopMenuEvent,
+        onTouchStart: stopMenuEvent,
+        onClick: stopMenuEvent,
         onContextMenu: (event) => event.preventDefault(),
       },
       item("下载", onDownload),
@@ -3960,6 +3976,31 @@
       }
     }
 
+    async function expandFolder(folder) {
+      if (Array.isArray(folder.children) && folder.children.length === 0) return;
+      if (folder.children === undefined && !folder.expanded) {
+        await loadChildren(folder);
+        return;
+      }
+      if (folder.expanded) return;
+      setFolderTree((current) =>
+        updateTreeNode(current, folder.id, (node) => ({
+          ...node,
+          expanded: true,
+        }))
+      );
+    }
+
+    async function onActivateTreeFolder(folder) {
+      onSelectFolder(folder);
+      await expandFolder(folder);
+    }
+
+    async function onToggleTreeFolder(folder) {
+      onSelectFolder(folder);
+      await onToggleFolder(folder);
+    }
+
     function selectFolderByPath(path, fallbackEntry = null) {
       const existing = findTreeNodeByPath(folderTree, path);
       setCurrentFolder(existing || folderFromEntry(fallbackEntry || { path, basename: pathBasename(path) }));
@@ -4824,17 +4865,17 @@
         React.createElement(
           "div",
           { className: "folder-browser-tree", ref: treeRef },
-          folderTree.map((folder) =>
-            React.createElement(FolderTreeNode, {
-              key: folder.id,
-              folder,
-              depth: 0,
-              currentID: currentFolder?.id,
-              onSelect: onSelectFolder,
-              onToggle: onToggleFolder,
-              onContextMenu: openFolderTreeContextMenu,
-            })
-          )
+            folderTree.map((folder) =>
+              React.createElement(FolderTreeNode, {
+                key: folder.id,
+                folder,
+                depth: 0,
+                currentID: currentFolder?.id,
+                onSelect: onActivateTreeFolder,
+                onToggle: onToggleTreeFolder,
+                onContextMenu: openFolderTreeContextMenu,
+              })
+            )
         ),
         includeResizer
           ? React.createElement("div", {
@@ -5091,34 +5132,34 @@
             currentFolderID: currentFolder?.id,
             onSelect: (folder) => setMoveTargetFolderID(folder.id),
             onToggle: onToggleFolder,
-            onCancel: () => {
-              setMoveDialog(null);
-              setMoveTargetFolderID(null);
-            },
-            onConfirm: confirmMoveDialog,
-          }),
-          React.createElement(ContextMenu, {
-            menu: contextMenu,
-            onDownload: downloadContextMedia,
-            onRename: renameContextMedia,
-            onMove: moveContextMedia,
-            onDelete: deleteContextMedia,
-            onClose: () => setContextMenu(null),
-          }),
-          isMobileLayout
-            ? React.createElement(MobileSelectionBar, {
-                selectedCount: selectedMediaCount,
-                selectedImageCount: selectedImages.length,
-                onDownload: downloadSelectedImages,
-                onMove: moveSelectedMedia,
-                onRename: renameSelectedMedia,
-                onDelete: deleteSelectedMedia,
-                onClear: clearSelection,
-              })
-            : null
-        )
-      )
-    );
+              onCancel: () => {
+                setMoveDialog(null);
+                setMoveTargetFolderID(null);
+              },
+              onConfirm: confirmMoveDialog,
+            }),
+            isMobileLayout
+              ? React.createElement(MobileSelectionBar, {
+                  selectedCount: selectedMediaCount,
+                  selectedImageCount: selectedImages.length,
+                  onDownload: downloadSelectedImages,
+                  onMove: moveSelectedMedia,
+                  onRename: renameSelectedMedia,
+                  onDelete: deleteSelectedMedia,
+                  onClear: clearSelection,
+                })
+              : null
+          )
+        ),
+        React.createElement(ContextMenu, {
+          menu: contextMenu,
+          onDownload: downloadContextMedia,
+          onRename: renameContextMedia,
+          onMove: moveContextMedia,
+          onDelete: deleteContextMedia,
+          onClose: () => setContextMenu(null),
+        })
+      );
   }
 
   api.register.route(ROUTE, FolderBrowserPage);
