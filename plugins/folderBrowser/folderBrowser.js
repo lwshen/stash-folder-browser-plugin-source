@@ -4274,7 +4274,7 @@
         }),
       [imageSizePreset.columns, imageSizePreset.wallHeight, isMobileLayout, mobileScrollMetrics.height, mobileScrollMetrics.top, wallImages]
     );
-    const lightboxImages = wallImages;
+    const lightboxImages = pictures;
     const selectedImages = React.useMemo(
       () => wallImages.filter((item) => selectedImageIDs.includes(item.imageID)),
       [wallImages, selectedImageIDs]
