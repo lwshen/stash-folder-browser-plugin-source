@@ -3,7 +3,6 @@
   if (!api) return;
 
   const React = api.React;
-  const ReactDOM = api.ReactDOM;
   const { Button, Form } = api.libraries.Bootstrap;
   const { Link, NavLink } = api.libraries.ReactRouterDOM;
   const { FontAwesomeIcon } = api.libraries.ReactFontAwesome;
@@ -2928,7 +2927,6 @@
         React.createElement(
           "button",
           {
-            type: "button",
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
             "data-folder-browser-image-id": item.imageID,
@@ -3047,7 +3045,7 @@
     );
   }
 
-  function ContextMenu({ menu, onDownload, onRename, onMove, onDelete, onClose }) {
+  function ContextMenu({ menu, onOpen, onDownload, onRename, onMove, onDelete, onClose }) {
     if (!menu) return null;
 
     function stopMenuEvent(event) {
@@ -3102,6 +3100,7 @@
         onClick: stopMenuEvent,
         onContextMenu: (event) => event.preventDefault(),
       },
+      item("打开", onOpen),
       item("下载", onDownload),
       item("移动", onMove),
       item("重命名", onRename),
@@ -3516,7 +3515,7 @@
     const fingerprints = file?.fingerprints?.map((fingerprint) => `${fingerprint.type}: ${fingerprint.value}`) || [];
     const customFields = item.image?.custom_fields || {};
 
-    const lightbox = React.createElement(
+    return React.createElement(
       "div",
       { className: "folder-browser-lightbox" + (landscape ? " landscape" : ""), role: "dialog", "aria-modal": "true" },
       React.createElement("div", { className: "folder-browser-lightbox-backdrop" }),
@@ -3628,10 +3627,6 @@
         )
       )
     );
-
-    return ReactDOM?.createPortal
-      ? ReactDOM.createPortal(lightbox, document.body)
-      : lightbox;
   }
 
   function FolderBrowserPage() {
@@ -4665,6 +4660,19 @@
       }
     }
 
+    function openContextMedia() {
+      if (!contextMenu?.item) return;
+      if (contextMenu.kind === "video") {
+        persistFolderState({ activeView: "video", lastOpenedSceneID: contextMenu.item.id });
+        window.location.assign(`${baseURL.replace(/\/$/, "")}/scenes/${contextMenu.item.id}?${SCENE_RETURN_PARAM}=1`);
+        return;
+      }
+      if (contextMenu.kind === "image") {
+        const index = lightboxImages.findIndex((image) => image.imageID === contextMenu.item.imageID);
+        if (index >= 0) openImagePreview(index);
+      }
+    }
+
     function moveContextMedia() {
       const file = contextFileInfo();
       if (!file.fileID) return;
@@ -5286,6 +5294,7 @@
         ),
         React.createElement(ContextMenu, {
           menu: contextMenu,
+          onOpen: openContextMedia,
           onDownload: downloadContextMedia,
           onRename: renameContextMedia,
           onMove: moveContextMedia,
