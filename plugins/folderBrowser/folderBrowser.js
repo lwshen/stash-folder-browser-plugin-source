@@ -3098,7 +3098,7 @@
           {
             className: "folder-browser-target-row" + (folder.id === selectedFolderID ? " selected" : "") + (folder.id === currentFolderID ? " current" : ""),
             style: { "--folder-depth": depth },
-            onClick: () => onSelect(folder.id),
+            onClick: () => onSelect(folder),
           },
           React.createElement(
             "button",
@@ -4332,36 +4332,7 @@
     async function moveFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
-      const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
-      const destination = window.prompt("目标目录路径", isDirectory ? entry.parent_path || "" : currentFolder?.path || entry.parent_path || "");
-      if (!destination) return;
-      const basename = window.prompt("新名称（留空保持原名）", "");
-      setLoading(true);
-      setError("");
-      try {
-        if (isDirectory) {
-          await callGQL(FOLDER_MOVE_MUTATION, {
-            path: entry.path,
-            destination,
-            basename: basename || null,
-          });
-          if (currentFolder?.path === entry.path) {
-            selectFolderByPath(joinFolderPath(destination, basename || entry.basename || pathBasename(entry.path)));
-          }
-          refreshFoldersAndContent();
-        } else {
-          await callGQL(FILE_MOVE_MUTATION, {
-            path: entry.path,
-            destination,
-            basename: basename || null,
-          });
-          refreshContent();
-        }
-      } catch (e) {
-        setError(friendlyFileApiError(e));
-      } finally {
-        setLoading(false);
-      }
+      openEntryMoveDialog(entry);
     }
 
     async function deleteFileEntry(item) {
@@ -4638,6 +4609,31 @@
       }
     }
 
+    function initialMoveTargetIDForEntry(entry) {
+      const sourcePath = normalizePathKey(entry?.path);
+      const parentPath = normalizePathKey(entry?.parent_path) || parentPathForPath(sourcePath);
+      const preferredPath = entry?.type === "DIRECTORY" || entry?.media_type === "DIRECTORY"
+        ? parentPath
+        : normalizePathKey(currentFolder?.path) || parentPath;
+      const currentTreeNode = currentFolder?.id ? findTreeNode(folderTree, currentFolder.id) : null;
+      return (
+        findTreeNodeByPath(folderTree, preferredPath)?.id ||
+        findTreeNodeByPath(folderTree, parentPath)?.id ||
+        currentTreeNode?.id ||
+        folderTree[0]?.id ||
+        null
+      );
+    }
+
+    function openEntryMoveDialog(entry) {
+      if (!entry?.path || !folderTree.length) return;
+      setMoveTargetFolderID(initialMoveTargetIDForEntry(entry));
+      setMoveDialog({
+        title: `移动 ${entry.basename || pathBasename(entry.path) || "文件"}`,
+        entry,
+      });
+    }
+
     function openMoveDialog(title, fileIDs, onDone) {
       if (!fileIDs.length || !currentFolder) return;
       setMoveTargetFolderID(currentFolder.id);
@@ -4648,7 +4644,47 @@
       openMoveDialog(`移动 ${selectedFileIDs.length} 个文件`, selectedFileIDs, clearSelection);
     }
 
+    async function confirmEntryMoveDialog() {
+      const entry = moveDialog?.entry;
+      const destinationFolder = findTreeNode(folderTree, moveTargetFolderID);
+      if (!entry?.path || !destinationFolder?.path) return;
+      const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+      setLoading(true);
+      setError("");
+      try {
+        if (isDirectory) {
+          await callGQL(FOLDER_MOVE_MUTATION, {
+            path: entry.path,
+            destination: destinationFolder.path,
+            basename: null,
+          });
+          if (currentFolder?.path === entry.path) {
+            selectFolderByPath(joinFolderPath(destinationFolder.path, entry.basename || pathBasename(entry.path)));
+          }
+          refreshFoldersAndContent();
+        } else {
+          await callGQL(FILE_MOVE_MUTATION, {
+            path: entry.path,
+            destination: destinationFolder.path,
+            basename: null,
+          });
+          refreshContent();
+        }
+        moveDialog.onDone?.();
+        setMoveDialog(null);
+        setMoveTargetFolderID(null);
+      } catch (e) {
+        setError(friendlyFileApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
     async function confirmMoveDialog() {
+      if (moveDialog?.entry) {
+        await confirmEntryMoveDialog();
+        return;
+      }
       if (!moveDialog?.fileIDs?.length || !moveTargetFolderID) return;
       setLoadingScenes(true);
       setLoadingImages(true);
@@ -5030,7 +5066,7 @@
             folderTree,
             selectedFolderID: moveTargetFolderID,
             currentFolderID: currentFolder?.id,
-            onSelect: setMoveTargetFolderID,
+            onSelect: (folder) => setMoveTargetFolderID(folder.id),
             onToggle: onToggleFolder,
             onCancel: () => {
               setMoveDialog(null);
