@@ -1359,10 +1359,14 @@ body.folder-browser-lightbox-open {
     pointer-events: none;
     position: absolute;
     right: calc(0.55rem + env(safe-area-inset-right));
-    top: calc(0.55rem + env(safe-area-inset-top));
+    top: calc(3rem + env(safe-area-inset-top));
     transition: visibility 0.1s, opacity 0.1s;
     visibility: hidden;
     z-index: 95;
+  }
+
+  body.folder-browser-player-landscape .folder-browser-mobile-player-controls {
+    top: calc(0.55rem + env(safe-area-inset-top));
   }
 
   .folder-browser-mobile-scene-details-panel {
