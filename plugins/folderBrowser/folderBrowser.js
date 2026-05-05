@@ -770,7 +770,7 @@
   function friendlyFileApiError(error) {
     const message = error?.message || String(error || "");
     if (message.includes("delete_trash_path")) {
-      return "需要先配置回收站路径，才能通过 Folder Browser 删除文件。";
+      return "删除失败：后端仍要求配置回收站路径，请确认 Stash fork 已更新并重启。";
     }
     return message;
   }
@@ -4354,7 +4354,7 @@
       const entry = item?.entry;
       if (!entry) return;
       const label = entry.basename || pathBasename(entry.path);
-      const confirmed = window.confirm(`删除 ${label}？需要先在 Stash 配置回收站路径。`);
+      const confirmed = window.confirm(`直接删除 ${label}？这个操作不可撤销。`);
       if (!confirmed) return;
       setLoading(true);
       setError("");
@@ -4608,7 +4608,7 @@
         setError("找不到图片文件路径，无法删除。");
         return;
       }
-      const confirmed = window.confirm(`删除 ${item.basename || item.title}？需要先在 Stash 配置回收站路径。`);
+      const confirmed = window.confirm(`直接删除 ${item.basename || item.title}？这个操作不可撤销。`);
       if (!confirmed) return;
       setLoadingImages(true);
       setError("");
