@@ -704,9 +704,34 @@
       id: `path:${entry.path}`,
       path: entry.path,
       basename: entry.basename || pathBasename(entry.path),
+      parent_path: entry.parent_path,
       parent_folders: [],
       sub_folders: [{ id: `${entry.path}/child` }],
     };
+  }
+
+  function folderParentPath(folder) {
+    if (folder?.parent_path) return normalizePathKey(folder.parent_path);
+    const path = normalizePathKey(folder?.path);
+    const basename = folder?.basename || pathBasename(path);
+    if (!path || !basename || !path.endsWith(basename)) return "";
+    return path.slice(0, Math.max(0, path.length - basename.length)).replace(/[\\/]$/, "");
+  }
+
+  function folderActionEntry(folder) {
+    if (!folder?.path) return null;
+    return {
+      path: folder.path,
+      basename: folder.basename || pathBasename(folder.path),
+      parent_path: folderParentPath(folder),
+      type: "DIRECTORY",
+      media_type: "DIRECTORY",
+    };
+  }
+
+  function canMutateFolder(folder) {
+    if (!folder?.path) return false;
+    return Boolean(folderParentPath(folder) || isPathOnlyFolder(folder));
   }
 
   function joinFolderPath(parent, basename) {
@@ -1084,8 +1109,12 @@
     includeChildren,
     previewAllVisible,
     sizeIndex,
+    canActOnCurrentFolder,
     onOpenFolders,
     onCreateFolder,
+    onRenameFolder,
+    onMoveFolder,
+    onDeleteFolder,
     onControlsToggle,
     controlsOpen,
     onActiveViewChange,
@@ -1216,7 +1245,10 @@
                 React.createElement(
                   "div",
                   { className: "folder-browser-mobile-chip-row" },
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录")
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onRenameFolder }, "重命名"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onMoveFolder }, "移动"),
+                  React.createElement(Button, { size: "sm", variant: "danger", disabled: !canActOnCurrentFolder, onClick: onDeleteFolder }, "删除")
                 )
               )
             )
@@ -2999,6 +3031,7 @@
 
   function FileActionToolbar({
     currentFolder,
+    canActOnCurrentFolder,
     selectedCount,
     selectedImageCount,
     selectedSceneCount,
@@ -3009,6 +3042,7 @@
     onClear,
     onCreateFolder,
   }) {
+    const canAct = selectedCount > 0 || canActOnCurrentFolder;
     return React.createElement(
       "div",
       { className: "folder-browser-file-toolbar" },
@@ -3018,9 +3052,9 @@
         { className: "folder-browser-toolbar-buttons" },
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount !== 1, onClick: onRename }, "重命名"),
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedCount, onClick: onMove }, "移动"),
-        React.createElement(Button, { size: "sm", variant: "danger", disabled: !selectedCount, onClick: onDelete }, "删除")
+        React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount > 1 || !canAct, onClick: onRename }, "重命名"),
+        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canAct, onClick: onMove }, "移动"),
+        React.createElement(Button, { size: "sm", variant: "danger", disabled: !canAct, onClick: onDelete }, "删除")
       ),
       selectedCount
         ? React.createElement(
@@ -4284,18 +4318,22 @@
     async function moveFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
-      const destination = window.prompt("目标目录路径", currentFolder?.path || entry.parent_path || "");
+      const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+      const destination = window.prompt("目标目录路径", isDirectory ? entry.parent_path || "" : currentFolder?.path || entry.parent_path || "");
       if (!destination) return;
       const basename = window.prompt("新名称（留空保持原名）", "");
       setLoading(true);
       setError("");
       try {
-        if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+        if (isDirectory) {
           await callGQL(FOLDER_MOVE_MUTATION, {
             path: entry.path,
             destination,
             basename: basename || null,
           });
+          if (currentFolder?.path === entry.path) {
+            selectFolderByPath(joinFolderPath(destination, basename || entry.basename || pathBasename(entry.path)));
+          }
           refreshFoldersAndContent();
         } else {
           await callGQL(FILE_MOVE_MUTATION, {
@@ -4323,6 +4361,19 @@
       try {
         if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
           await callGQL(FOLDER_DELETE_MUTATION, { path: entry.path });
+          if (currentFolder?.path === entry.path) {
+            const parentPath = entry.parent_path || folderParentPath(currentFolder);
+            if (parentPath) {
+              selectFolderByPath(parentPath, {
+                path: parentPath,
+                basename: pathBasename(parentPath),
+                type: "DIRECTORY",
+                media_type: "DIRECTORY",
+              });
+            } else {
+              openRoot();
+            }
+          }
           refreshFoldersAndContent();
         } else {
           await callGQL(FILE_DELETE_MUTATION, { path: entry.path });
@@ -4639,104 +4690,46 @@
       }
     }
 
-    async function loadAllCurrentMedia(includeDescendants = false) {
-      if (!currentFolder) return { scenes: [], images: [] };
-      const criterion = folderCriterion(currentFolder.id, includeDescendants);
-      const [sceneData, imageData] = await Promise.all([
-        callGQL(SCENES_QUERY, {
-          folderCriterion: criterion,
-          mediaFilter: findFilter(sortState.key, sortState.direction, -1, 1),
-        }),
-        callGQL(IMAGES_QUERY, {
-          folderCriterion: criterion,
-          mediaFilter: findFilter(sortState.key, sortState.direction, -1, 1),
-        }),
-      ]);
-      return {
-        scenes: sceneData.findScenes.scenes ?? [],
-        images: imageItems(imageData.findImages.images ?? []),
-      };
-    }
-
     async function renameCurrentFolder() {
-      if (!currentFolder) return;
-      const parentPath = currentFolder.path.slice(0, Math.max(0, currentFolder.path.length - (currentFolder.basename || "").length)).replace(/[\\/]$/, "");
-      const basename = window.prompt("新的目录名", currentFolder.basename || "");
-      if (!basename || basename === currentFolder.basename) return;
-      const destination = parentPath ? `${parentPath}/${basename}` : basename;
-      const confirmed = window.confirm("会把当前目录直属媒体文件移动到新目录。子目录不会被整体重命名。继续？");
-      if (!confirmed) return;
-      setLoading(true);
-      setError("");
-      try {
-        const media = await loadAllCurrentMedia(false);
-        const fileIDs = [
-          ...media.scenes.map((item) => primarySceneFile(item)?.id).filter(Boolean),
-          ...media.images.map((item) => item.fileID).filter(Boolean),
-        ];
-        if (!fileIDs.length) throw new Error("当前目录没有可移动的媒体文件。");
-        await callGQL(MOVE_FILES_MUTATION, {
-          input: {
-            ids: fileIDs,
-            destination_folder: destination,
-          },
-        });
-        clearSelection();
-        openRoot();
-        setFolderReloadKey((current) => current + 1);
-        setReloadKey((current) => current + 1);
-      } catch (e) {
-        setError(e.message || String(e));
-      } finally {
-        setLoading(false);
-      }
+      const entry = folderActionEntry(currentFolder);
+      if (!entry || !canMutateFolder(currentFolder)) return;
+      await renameFileEntry({ entry });
     }
 
-    async function deleteCurrentFolderMedia() {
-      if (!currentFolder) return;
-      const confirmed = window.confirm("会递归删除当前目录、所有子目录里的已扫描视频/图片及其文件。这个操作会修改 NAS 上的实际文件。继续？");
-      if (!confirmed) return;
-      setLoading(true);
-      setError("");
-      try {
-        const media = await loadAllCurrentMedia(true);
-        await Promise.all([
-          media.scenes.length
-            ? callGQL(SCENES_DESTROY_MUTATION, {
-                input: {
-                  ids: media.scenes.map((item) => item.id),
-                  delete_file: true,
-                  delete_generated: true,
-                  destroy_file_entry: true,
-                },
-              })
-            : Promise.resolve(),
-          media.images.length
-            ? callGQL(IMAGES_DESTROY_MUTATION, {
-                input: {
-                  ids: media.images.map((item) => item.imageID),
-                  delete_file: true,
-                  delete_generated: true,
-                  destroy_file_entry: true,
-                },
-              })
-            : Promise.resolve(),
-        ]);
-        await callGQL(METADATA_CLEAN_MUTATION, {
-          input: {
-            paths: [currentFolder.path],
-            ignoreZipFileContents: true,
-            dryRun: false,
-          },
-        });
-        clearSelection();
-        openRoot();
-        setFolderReloadKey((current) => current + 1);
-      } catch (e) {
-        setError(e.message || String(e));
-      } finally {
-        setLoading(false);
+    async function moveCurrentFolder() {
+      const entry = folderActionEntry(currentFolder);
+      if (!entry || !canMutateFolder(currentFolder)) return;
+      await moveFileEntry({ entry });
+    }
+
+    async function deleteCurrentFolder() {
+      const entry = folderActionEntry(currentFolder);
+      if (!entry || !canMutateFolder(currentFolder)) return;
+      await deleteFileEntry({ entry });
+    }
+
+    function renameToolbarTarget() {
+      if (selectedMediaCount) {
+        renameSelectedMedia();
+        return;
       }
+      renameCurrentFolder();
+    }
+
+    function moveToolbarTarget() {
+      if (selectedMediaCount) {
+        moveSelectedMedia();
+        return;
+      }
+      moveCurrentFolder();
+    }
+
+    function deleteToolbarTarget() {
+      if (selectedMediaCount) {
+        deleteSelectedMedia();
+        return;
+      }
+      deleteCurrentFolder();
     }
 
     function renderSidebar(className, includeResizer, treeRef = null) {
@@ -4745,13 +4738,14 @@
         { className },
         React.createElement(FileActionToolbar, {
           currentFolder,
+          canActOnCurrentFolder: canMutateFolder(currentFolder),
           selectedCount: selectedMediaCount,
           selectedImageCount: selectedImages.length,
           selectedSceneCount: selectedScenes.length,
           onDownload: downloadSelectedImages,
-          onRename: renameSelectedMedia,
-          onMove: moveSelectedMedia,
-          onDelete: deleteSelectedMedia,
+          onRename: renameToolbarTarget,
+          onMove: moveToolbarTarget,
+          onDelete: deleteToolbarTarget,
           onClear: clearSelection,
           onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
         }),
@@ -4831,10 +4825,14 @@
                   includeChildren,
                   previewAllVisible,
                   sizeIndex: activeSizeIndex,
+                  canActOnCurrentFolder: canMutateFolder(currentFolder),
                   controlsOpen: mobileControlsOpen,
                   onControlsToggle: () => setMobileControlsOpen((current) => !current),
                   onOpenFolders: () => setMobileFoldersOpen(true),
                   onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
+                  onRenameFolder: renameCurrentFolder,
+                  onMoveFolder: moveCurrentFolder,
+                  onDeleteFolder: deleteCurrentFolder,
                   onActiveViewChange: setActiveView,
                   onSortChange,
                   onSizeChange: onActiveSizeChange,
