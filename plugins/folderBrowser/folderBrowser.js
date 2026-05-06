@@ -2948,10 +2948,16 @@
         React.createElement(
           "button",
           {
+            type: "button",
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
             "data-folder-browser-image-id": item.imageID,
             onClick: () => onOpen(startIndex + index),
+            onPointerUp: (event) => {
+              if (event.pointerType !== "mouse" || event.button !== 0) return;
+              if (event.target.closest?.(".folder-browser-media-check")) return;
+              onOpen(startIndex + index);
+            },
             onContextMenu: (event) => onContextMenu(event, item),
             style: { "--folder-wall-aspect": imageAspect(item) },
             title: item.path,
@@ -2961,6 +2967,8 @@
             className: "folder-browser-media-check",
             checked: selected,
             onChange: (event) => onSelectionChange(item.imageID, event.target.checked),
+            onPointerDown: (event) => event.stopPropagation(),
+            onPointerUp: (event) => event.stopPropagation(),
             onClick: (event) => event.stopPropagation(),
           }),
           item.meta
@@ -3501,6 +3509,7 @@
 
     function onPointerDown(event) {
       if (event.target.closest?.(".folder-browser-lightbox-toolbar, .folder-browser-lightbox-details, .folder-browser-lightbox-menu")) return;
+      if (event.pointerType === "mouse" && event.target.closest?.(".folder-browser-lightbox-zone")) return;
       event.preventDefault();
       lastPointerTypeRef.current = event.pointerType || "mouse";
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -3651,7 +3660,8 @@
 
     function navigateFromZone(event, delta) {
       if (consumeSuppressedClick(event)) return;
-      if (lastPointerTypeRef.current !== "mouse") return;
+      event.preventDefault();
+      event.stopPropagation();
       revealChrome();
       onNavigate(delta);
     }
@@ -3779,6 +3789,7 @@
           React.createElement(
             "button",
             {
+              type: "button",
               className: "folder-browser-lightbox-zone prev" + (hoverZone === "prev" ? " hovered" : ""),
               onMouseEnter: () => setHoverZone("prev"),
               onMouseMove: () => setHoverZone("prev"),
@@ -3791,6 +3802,7 @@
           React.createElement(
             "button",
             {
+              type: "button",
               className: "folder-browser-lightbox-zone next" + (hoverZone === "next" ? " hovered" : ""),
               onMouseEnter: () => setHoverZone("next"),
               onMouseMove: () => setHoverZone("next"),
