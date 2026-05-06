@@ -4263,7 +4263,9 @@
             suppressNextClick();
             onNavigate(dx < 0 ? 1 : -1);
           } else if (absX < 12 && absY < 12 && elapsed < 380) {
-            maybeToggleLandscapeFromTap(event, gesture);
+            if (!maybeToggleLandscapeFromTap(event, gesture)) {
+              revealChrome();
+            }
           }
         }
       }
