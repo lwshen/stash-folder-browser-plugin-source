@@ -3330,13 +3330,12 @@
     onCreateFolder,
   }) {
     const [menuOpen, setMenuOpen] = React.useState(false);
-    const rootRef = React.useRef(null);
     const canAct = selectedCount > 0 || canActOnCurrentFolder;
 
     React.useEffect(() => {
       if (!menuOpen) return undefined;
       function closeOnOutside(event) {
-        if (rootRef.current?.contains(event.target)) return;
+        if (event.target.closest?.(".folder-browser-toolbar-menu, .folder-browser-toolbar-menu-button")) return;
         setMenuOpen(false);
       }
       function closeOnEscape(event) {
@@ -3374,7 +3373,7 @@
 
     return React.createElement(
       "div",
-      { className: "folder-browser-file-toolbar", ref: rootRef },
+      { className: "folder-browser-file-toolbar" },
       React.createElement(
         "div",
         { className: "folder-browser-toolbar-head" },
