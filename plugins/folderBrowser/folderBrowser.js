@@ -4303,17 +4303,18 @@
         const absX = Math.abs(dx);
         const absY = Math.abs(dy);
         const elapsed = Date.now() - gesture.startTime;
-        if (gesture.startZoom <= 1) {
+        const isTap = absX < 12 && absY < 12 && elapsed < 380;
+        if (isTap) {
+          if (!maybeHandleDoubleTap(event, gesture)) {
+            revealChrome();
+          }
+        } else if (gesture.startZoom <= 1) {
           if (gesture.edgeSwipe && dx > 72 && absY < Math.max(60, absX * 0.75)) {
             suppressNextClick();
             onClose();
           } else if (absX > 64 && absX > absY * 1.2) {
             suppressNextClick();
             onNavigate(dx < 0 ? 1 : -1);
-          } else if (absX < 12 && absY < 12 && elapsed < 380) {
-            if (!maybeHandleDoubleTap(event, gesture)) {
-              revealChrome();
-            }
           }
         }
       }
