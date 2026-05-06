@@ -3222,7 +3222,7 @@
     );
   }
 
-  function ImageLightbox({ items, index, playing, onClose, onNavigate, onPlayingChange, onDownload, onDelete, onMoveFile }) {
+  function ImageLightbox({ items, index, playing, isMobileLayout = false, onClose, onNavigate, onPlayingChange, onDownload, onDelete, onMoveFile }) {
     const item = index === null ? null : items[index];
     const [zoom, setZoom] = React.useState(1);
     const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -3242,6 +3242,7 @@
     const suppressClickRef = React.useRef(false);
     const suppressClickTimerRef = React.useRef(0);
     const chromeTimerRef = React.useRef(0);
+    const autoHideChrome = isMobileLayout;
 
     React.useEffect(() => {
       if (!playing || !item || items.length <= 1) return undefined;
@@ -3271,15 +3272,16 @@
 
     React.useEffect(() => {
       if (!item) return undefined;
-      document.body?.classList.toggle("folder-browser-image-lightbox-landscape", landscape);
-      if (landscape) {
+      const mobileLandscape = isMobileLayout && landscape;
+      document.body?.classList.toggle("folder-browser-image-lightbox-landscape", mobileLandscape);
+      if (mobileLandscape) {
         setDetailsOpen(false);
         screen.orientation?.lock?.("landscape").catch?.(() => {});
       } else {
         screen.orientation?.unlock?.();
       }
       return () => document.body?.classList.remove("folder-browser-image-lightbox-landscape");
-    }, [item, landscape]);
+    }, [item, isMobileLayout, landscape]);
 
     React.useEffect(() => {
       if (!item) {
@@ -3322,14 +3324,22 @@
     }, [index]);
 
     React.useEffect(() => {
+      if (!isMobileLayout) setLandscape(false);
+    }, [isMobileLayout]);
+
+    React.useEffect(() => {
       if (!item) return undefined;
       setChromeVisible(true);
       setHoverZone(null);
       setMenuOpen(false);
       setSlideshowSettingsOpen(false);
-      scheduleChromeHide();
+      if (autoHideChrome) {
+        scheduleChromeHide();
+      } else {
+        clearChromeTimer();
+      }
       return () => clearChromeTimer();
-    }, [item]);
+    }, [item, autoHideChrome]);
 
     React.useEffect(() => () => {
       clearChromeTimer();
@@ -3355,6 +3365,7 @@
     }
 
     function hideChrome() {
+      if (!autoHideChrome) return;
       setChromeVisible(false);
       setHoverZone(null);
       setMenuOpen(false);
@@ -3363,6 +3374,7 @@
 
     function scheduleChromeHide() {
       clearChromeTimer();
+      if (!autoHideChrome) return;
       chromeTimerRef.current = window.setTimeout(hideChrome, 3000);
     }
 
@@ -3433,10 +3445,12 @@
     }
 
     function toggleLandscape() {
+      if (!isMobileLayout) return;
       setLandscape((current) => !current);
     }
 
     function maybeToggleLandscapeFromTap(event, gesture) {
+      if (!isMobileLayout) return false;
       const now = Date.now();
       const last = lastTapRef.current;
       if (
@@ -3589,6 +3603,7 @@
     const customFields = item.image?.custom_fields || {};
     const lightboxClassName =
       "folder-browser-lightbox" +
+      (isMobileLayout ? " mobile" : " desktop") +
       (landscape ? " landscape" : "") +
       (chromeVisible ? " chrome-visible" : " chrome-hidden");
 
@@ -3740,10 +3755,12 @@
             onPointerUp,
             onPointerCancel: onPointerUp,
             onMouseLeave: () => setHoverZone(null),
-            onDoubleClick: (event) => {
-              event.preventDefault();
-              toggleLandscape();
-            },
+            onDoubleClick: isMobileLayout
+              ? (event) => {
+                  event.preventDefault();
+                  toggleLandscape();
+                }
+              : undefined,
           },
           React.createElement("img", {
             ref: imageRef,
@@ -5461,6 +5478,7 @@
             items: lightboxImages,
             index: lightboxIndex,
             playing: slideshow,
+            isMobileLayout,
             onClose: () => {
               closeImagePreview();
               setSlideshow(false);

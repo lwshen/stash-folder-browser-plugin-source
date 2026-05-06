@@ -962,7 +962,7 @@ body.folder-browser-lightbox-open {
   width: 100%;
 }
 
-.folder-browser-lightbox.landscape .folder-browser-lightbox-panel {
+.folder-browser-lightbox.mobile.landscape .folder-browser-lightbox-panel {
   bottom: auto;
   height: 100vw;
   left: 50%;
@@ -990,10 +990,14 @@ body.folder-browser-lightbox-open {
   z-index: 8;
 }
 
-.folder-browser-lightbox.chrome-hidden .folder-browser-lightbox-toolbar,
-.folder-browser-lightbox.chrome-hidden .folder-browser-lightbox-details {
+.folder-browser-lightbox.mobile.chrome-hidden .folder-browser-lightbox-toolbar,
+.folder-browser-lightbox.mobile.chrome-hidden .folder-browser-lightbox-details {
   opacity: 0;
   pointer-events: none;
+}
+
+.folder-browser-lightbox.desktop .folder-browser-lightbox-toolbar {
+  background: linear-gradient(rgba(0, 0, 0, 0.58), transparent);
 }
 
 .folder-browser-lightbox-toolbar-left {
@@ -1263,7 +1267,7 @@ body.folder-browser-lightbox-open {
   z-index: 7;
 }
 
-.folder-browser-lightbox.landscape .folder-browser-lightbox-details {
+.folder-browser-lightbox.mobile.landscape .folder-browser-lightbox-details {
   display: none;
 }
 
