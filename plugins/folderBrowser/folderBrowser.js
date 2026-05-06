@@ -9,6 +9,7 @@
   const { FontAwesomeIcon } = api.libraries.ReactFontAwesome;
   const {
     faArrowLeft,
+    faArrowUp,
     faChevronLeft,
     faChevronRight,
     faDownload,
@@ -96,6 +97,15 @@
 
   function refreshCurrentPage() {
     window.location.reload();
+  }
+
+  function scrollFolderBrowserToTop() {
+    const scrollArea = document.querySelector(".folder-browser-scroll-area");
+    if (scrollArea?.scrollTo) {
+      scrollArea.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    window.scrollTo?.({ top: 0, behavior: "smooth" });
   }
 
   async function updateFolderBrowserPluginPackage() {
@@ -1740,6 +1750,18 @@
       FontAwesomeIcon
         ? React.createElement(FontAwesomeIcon, { icon: faSyncAlt || faRedoAlt, className: "fa-icon" })
         : "刷新"
+    );
+  }
+
+  function NavScrollTopButton() {
+    return React.createElement(
+      Button,
+      {
+        className: "minimal folder-browser-nav-top",
+        onClick: scrollFolderBrowserToTop,
+        title: "回到顶部",
+      },
+      iconNode(faArrowUp, "↑")
     );
   }
 
@@ -4919,6 +4941,7 @@
     const sceneWallRef = React.useRef(null);
     const imageWallRef = React.useRef(null);
     const mobileScrollFrameRef = React.useRef(null);
+    const pullRefreshRef = React.useRef({ tracking: false, startY: 0, armed: false });
     const initialSortState = savedState?.sortState?.key === "basename"
       ? { ...savedState.sortState, key: "filename" }
       : savedState?.sortState;
@@ -5846,6 +5869,45 @@
     const handleScrollAreaScroll = React.useCallback(() => {
       scheduleMobileScrollMetrics();
     }, [scheduleMobileScrollMetrics]);
+
+    function resetPullRefresh() {
+      pullRefreshRef.current = { tracking: false, startY: 0, armed: false };
+    }
+
+    function handleScrollAreaTouchStart(event) {
+      if (!isMobileLayout || event.touches?.length !== 1) return;
+      const node = scrollAreaRef.current;
+      if (!node || node.scrollTop > 0) return;
+      pullRefreshRef.current = {
+        tracking: true,
+        startY: event.touches[0].clientY,
+        armed: false,
+      };
+    }
+
+    function handleScrollAreaTouchMove(event) {
+      const state = pullRefreshRef.current;
+      if (!isMobileLayout || !state.tracking || event.touches?.length !== 1) return;
+      const node = scrollAreaRef.current;
+      if (!node || node.scrollTop > 0) {
+        resetPullRefresh();
+        return;
+      }
+      const distance = event.touches[0].clientY - state.startY;
+      if (distance < 0) {
+        resetPullRefresh();
+        return;
+      }
+      if (distance > 12) event.preventDefault();
+      state.armed = distance >= 88;
+    }
+
+    function handleScrollAreaTouchEnd() {
+      const state = pullRefreshRef.current;
+      const shouldRefresh = isMobileLayout && state.tracking && state.armed;
+      resetPullRefresh();
+      if (shouldRefresh) refreshCurrentPage();
+    }
 
     function openFileEntry(item) {
       const entry = item?.entry;
@@ -7007,6 +7069,10 @@
                 if (!event.target.closest?.(".folder-browser-wall-tile")) setTouchPreviewSceneID(null);
               },
               onContextMenu: openCurrentFolderContextMenu,
+              onTouchStart: handleScrollAreaTouchStart,
+              onTouchMove: handleScrollAreaTouchMove,
+              onTouchEnd: handleScrollAreaTouchEnd,
+              onTouchCancel: resetPullRefresh,
               onScroll: () => {
                 handleScrollAreaScroll();
                 setContextMenu(null);
@@ -7160,6 +7226,7 @@
         children: React.createElement(
           React.Fragment,
           null,
+          React.createElement(NavScrollTopButton, { key: "folder-browser-nav-top" }),
           React.createElement(NavRefreshButton, { key: "folder-browser-nav-refresh" }),
           React.createElement(NavPluginUpdateButton, { key: "folder-browser-nav-plugin-update" }),
           props.children

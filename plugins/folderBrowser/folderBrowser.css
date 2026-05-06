@@ -880,6 +880,7 @@
   white-space: nowrap;
 }
 
+.folder-browser-nav-top,
 .folder-browser-nav-refresh,
 .folder-browser-nav-plugin-update {
   align-items: center;
@@ -888,6 +889,7 @@
   min-width: 2.35rem;
 }
 
+.folder-browser-nav-top,
 .folder-browser-nav-refresh {
   justify-content: center;
 }
@@ -1088,6 +1090,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior-y: contain;
   padding-right: 0.25rem;
 }
 
