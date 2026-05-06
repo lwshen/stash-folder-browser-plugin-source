@@ -3241,10 +3241,14 @@
     const [slideshowIntervalMs, setSlideshowIntervalMs] = React.useState(3000);
     const [landscape, setLandscape] = React.useState(false);
     const [displaySrc, setDisplaySrc] = React.useState("");
+    const [previousDisplaySrc, setPreviousDisplaySrc] = React.useState("");
+    const [imageReady, setImageReady] = React.useState(false);
     const [chromeVisible, setChromeVisible] = React.useState(true);
     const [hoverZone, setHoverZone] = React.useState(null);
     const gestureRef = React.useRef(null);
     const imageRef = React.useRef(null);
+    const displaySrcRef = React.useRef("");
+    const previousClearTimerRef = React.useRef(0);
     const pointersRef = React.useRef(new Map());
     const lastTapRef = React.useRef(null);
     const lastPointerTypeRef = React.useRef("mouse");
@@ -3295,19 +3299,39 @@
     React.useEffect(() => {
       if (!item) {
         setDisplaySrc("");
+        setPreviousDisplaySrc("");
+        setImageReady(false);
+        displaySrcRef.current = "";
         return undefined;
       }
       const previewSrc = item.preview || item.thumb || item.full || item.original || "";
       const fullSrc = item.full || item.original || previewSrc;
       let cancelled = false;
-      setDisplaySrc(previewSrc);
+      function swapImage(src, fade = true) {
+        if (cancelled || !src) return;
+        if (src === displaySrcRef.current) {
+          setImageReady(true);
+          return;
+        }
+        window.clearTimeout(previousClearTimerRef.current);
+        if (fade && displaySrcRef.current) setPreviousDisplaySrc(displaySrcRef.current);
+        displaySrcRef.current = src;
+        setImageReady(false);
+        setDisplaySrc(src);
+      }
+      swapImage(previewSrc, true);
       if (!fullSrc || fullSrc === previewSrc) return undefined;
       const image = new Image();
-      image.onload = () => {
-        if (!cancelled) setDisplaySrc(fullSrc);
+      image.onload = async () => {
+        try {
+          await image.decode?.();
+        } catch (e) {
+          // The load event is enough when decode() is not available or rejects.
+        }
+        swapImage(fullSrc, true);
       };
       image.onerror = () => {
-        if (!cancelled) setDisplaySrc(previewSrc);
+        swapImage(previewSrc, false);
       };
       image.src = fullSrc;
       return () => {
@@ -3320,6 +3344,7 @@
       setPan({ x: 0, y: 0 });
       setDetailsOpen(false);
       setMenuOpen(false);
+      setImageReady(false);
       pointersRef.current.clear();
       gestureRef.current = null;
     }, [index]);
@@ -3353,6 +3378,7 @@
     React.useEffect(() => () => {
       clearChromeTimer();
       window.clearTimeout(suppressClickTimerRef.current);
+      window.clearTimeout(previousClearTimerRef.current);
     }, []);
 
     React.useEffect(() => {
@@ -3615,6 +3641,7 @@
       "folder-browser-lightbox" +
       (isMobileLayout ? " mobile" : " desktop") +
       (landscape ? " landscape" : "") +
+      (detailsOpen ? " details-open" : "") +
       (chromeVisible ? " chrome-visible" : " chrome-hidden");
 
     function lightboxIconButton(className, title, onClick, children, extraProps = {}) {
@@ -3724,7 +3751,6 @@
                     { className: "folder-browser-lightbox-menu" },
                     lightboxMenuButton("删除", () => onDelete(item), { danger: true }),
                     lightboxMenuButton("移动到", () => onMoveFile?.(item)),
-                    lightboxMenuButton("复制到", null, { disabled: true, title: "当前后端还没有提供复制接口" }),
                     lightboxMenuButton("下载", () => onDownload(item)),
                     lightboxMenuButton("幻灯片设置", () => setSlideshowSettingsOpen((current) => !current), { keepOpen: true }),
                     slideshowSettingsOpen
@@ -3758,59 +3784,80 @@
         ),
         React.createElement(
           "div",
-          {
-            className: "folder-browser-lightbox-stage",
-            onWheel,
-            onPointerDown,
-            onPointerMove,
-            onPointerUp,
-            onPointerCancel: onPointerUp,
-            onMouseLeave: () => setHoverZone(null),
-            onDoubleClick: isMobileLayout
-              ? (event) => {
-                  event.preventDefault();
-                  toggleLandscape();
+          { className: "folder-browser-lightbox-content" },
+          React.createElement(
+            "div",
+            {
+              className: "folder-browser-lightbox-stage",
+              onWheel,
+              onPointerDown,
+              onPointerMove,
+              onPointerUp,
+              onPointerCancel: onPointerUp,
+              onMouseLeave: () => setHoverZone(null),
+              onDoubleClick: isMobileLayout
+                ? (event) => {
+                    event.preventDefault();
+                    toggleLandscape();
+                  }
+                : undefined,
+            },
+            previousDisplaySrc
+              ? React.createElement("img", {
+                  className: "folder-browser-lightbox-image previous",
+                  src: previousDisplaySrc,
+                  alt: "",
+                  "aria-hidden": "true",
+                })
+              : null,
+            React.createElement("img", {
+              ref: imageRef,
+              className: "folder-browser-lightbox-image current" + (imageReady ? " ready" : ""),
+              src: displaySrc || item.preview || item.thumb || item.full,
+              alt: item.title,
+              onLoad: () => {
+                setImageReady(true);
+                if (previousDisplaySrc) {
+                  window.clearTimeout(previousClearTimerRef.current);
+                  previousClearTimerRef.current = window.setTimeout(() => setPreviousDisplaySrc(""), 240);
                 }
-              : undefined,
-          },
-          React.createElement("img", {
-            ref: imageRef,
-            src: displaySrc || item.preview || item.thumb || item.full,
-            alt: item.title,
-            onClick: (event) => {
-              consumeSuppressedClick(event);
-            },
-            style: {
-              "--folder-lightbox-zoom": zoom,
-              "--folder-lightbox-pan-x": `${pan.x}px`,
-              "--folder-lightbox-pan-y": `${pan.y}px`,
-            },
-          }),
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              className: "folder-browser-lightbox-zone prev" + (hoverZone === "prev" ? " hovered" : ""),
-              onMouseEnter: () => setHoverZone("prev"),
-              onMouseMove: () => setHoverZone("prev"),
-              onMouseLeave: () => setHoverZone((current) => current === "prev" ? null : current),
-              onClick: (event) => navigateFromZone(event, -1),
-              title: "上一张",
-            },
-            React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronLeft, "‹"))
-          ),
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              className: "folder-browser-lightbox-zone next" + (hoverZone === "next" ? " hovered" : ""),
-              onMouseEnter: () => setHoverZone("next"),
-              onMouseMove: () => setHoverZone("next"),
-              onMouseLeave: () => setHoverZone((current) => current === "next" ? null : current),
-              onClick: (event) => navigateFromZone(event, 1),
-              title: "下一张",
-            },
-            React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronRight, "›"))
+              },
+              onError: () => setImageReady(true),
+              onClick: (event) => {
+                consumeSuppressedClick(event);
+              },
+              style: {
+                "--folder-lightbox-zoom": zoom,
+                "--folder-lightbox-pan-x": `${pan.x}px`,
+                "--folder-lightbox-pan-y": `${pan.y}px`,
+              },
+            }),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "folder-browser-lightbox-zone prev" + (hoverZone === "prev" ? " hovered" : ""),
+                onMouseEnter: () => setHoverZone("prev"),
+                onMouseMove: () => setHoverZone("prev"),
+                onMouseLeave: () => setHoverZone((current) => current === "prev" ? null : current),
+                onClick: (event) => navigateFromZone(event, -1),
+                title: "上一张",
+              },
+              React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronLeft, "‹"))
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "folder-browser-lightbox-zone next" + (hoverZone === "next" ? " hovered" : ""),
+                onMouseEnter: () => setHoverZone("next"),
+                onMouseMove: () => setHoverZone("next"),
+                onMouseLeave: () => setHoverZone((current) => current === "next" ? null : current),
+                onClick: (event) => navigateFromZone(event, 1),
+                title: "下一张",
+              },
+              React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronRight, "›"))
+            )
           ),
           detailsOpen
             ? React.createElement(
