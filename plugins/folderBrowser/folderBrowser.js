@@ -530,11 +530,8 @@
             ... on VideoFile {
               id
               path
-              basename
               width
               height
-              format
-              size
               video_codec
               mod_time
               created_at
@@ -745,9 +742,7 @@
   }
 
   function primaryImageFile(image) {
-    return image.files?.[0]
-      || image.visual_files?.find((file) => file.__typename === "ImageFile")
-      || image.visual_files?.[0];
+    return image.files?.[0];
   }
 
   function fileFormat(file) {
@@ -759,18 +754,11 @@
   }
 
   function isHEIFFile(file) {
-    return ["heic", "heif", "hif"].includes(fileFormat(file));
-  }
-
-  function isHIFFile(file) {
-    return fileFormat(file) === "hif";
+    return ["heic", "heif"].includes(fileFormat(file));
   }
 
   function imageDisplayPath(image, file) {
     const paths = image?.paths || {};
-    if (isHIFFile(file)) {
-      return paths.preview || paths.thumbnail || paths.image;
-    }
     if (isHEIFFile(file)) {
       return paths.image || paths.preview || paths.thumbnail;
     }
