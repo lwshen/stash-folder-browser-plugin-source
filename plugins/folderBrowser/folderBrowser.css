@@ -1210,7 +1210,7 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
 .folder-browser-lightbox-image {
   cursor: zoom-in;
   display: block;
-  height: 100%;
+  height: auto;
   max-height: 100%;
   max-width: 100%;
   object-fit: contain;
@@ -1220,8 +1220,13 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
   transform-origin: center center;
   transition: opacity 120ms ease-out;
   user-select: none;
-  width: 100%;
+  width: auto;
   will-change: opacity;
+}
+
+.folder-browser-lightbox-image.preview {
+  height: 100%;
+  width: 100%;
 }
 
 .folder-browser-lightbox-image.current {

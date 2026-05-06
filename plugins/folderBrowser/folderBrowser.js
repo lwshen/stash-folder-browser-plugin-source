@@ -3902,7 +3902,9 @@
             },
             React.createElement("img", {
               ref: imageRef,
-              className: "folder-browser-lightbox-image current" + (imageReady ? " ready" : ""),
+              className: "folder-browser-lightbox-image current"
+                + (imageReady ? " ready" : "")
+                + (displaySrc && displaySrc !== lightboxFullSrc(item) ? " preview" : ""),
               src: displaySrc || item.preview || item.thumb || item.full,
               alt: item.title,
               onLoad: () => setImageReady(true),
