@@ -3,6 +3,7 @@
   if (!api) return;
 
   const React = api.React;
+  const ReactDOM = api.ReactDOM;
   const { Button, Form } = api.libraries.Bootstrap;
   const { Link, NavLink } = api.libraries.ReactRouterDOM;
   const { FontAwesomeIcon } = api.libraries.ReactFontAwesome;
@@ -3655,7 +3656,7 @@
       onNavigate(delta);
     }
 
-    return React.createElement(
+    const lightbox = React.createElement(
       "div",
       {
         className: lightboxClassName,
@@ -3827,6 +3828,10 @@
         )
       )
     );
+
+    return ReactDOM?.createPortal
+      ? ReactDOM.createPortal(lightbox, document.body)
+      : lightbox;
   }
 
   function FolderBrowserPage() {

@@ -952,6 +952,13 @@ body.folder-browser-lightbox-open header.navbar {
   display: none !important;
 }
 
+body.folder-browser-lightbox-open .folder-browser-sidebar,
+body.folder-browser-lightbox-open .folder-browser-sidebar-collapse,
+body.folder-browser-lightbox-open .folder-browser-mobile-drawer,
+body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
+  display: none !important;
+}
+
 .folder-browser-lightbox-backdrop {
   background: #000;
   height: 100%;
