@@ -906,7 +906,7 @@
   }
 
   function mediaTypeLabel(entry) {
-    if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") return "目录";
+    if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") return "文件夹";
     if (entry.media_type === "VIDEO") return "视频";
     if (entry.media_type === "IMAGE") return "图片";
     if (entry.media_type === "GALLERY") return "图库";
@@ -1618,7 +1618,7 @@
                 React.createElement(
                   "div",
                   { className: "folder-browser-mobile-chip-row" },
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建文件夹"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onUploadFiles }, "上传文件"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onUploadFolder }, "上传文件夹"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onRenameFolder }, "重命名"),
@@ -3342,17 +3342,18 @@
     );
   }
 
-  function OtherEntryRow({ item, onOpen, onContextMenu }) {
+  function OtherEntryRow({ item, activePath, onOpen, onContextMenu }) {
     const longPressRef = React.useRef(null);
     const longPressTriggeredRef = React.useRef(false);
     const entry = item.entry;
     const isDirectory = isDirectoryEntry(entry);
     const title = entry.basename || pathBasename(entry.path);
     const extension = String(entry.extension || "").replace(/^\./, "");
+    const previewKind = previewKindForEntry(entry);
     const previewLabel = previewLabelForEntry(entry);
-    const canPreview = Boolean(previewLabel);
+    const canPreview = Boolean(previewKind);
+    const contextSelected = Boolean(activePath && activePath === entry.path);
     const meta = [
-      previewLabel,
       mediaTypeLabel(entry),
       isDirectory ? "" : formatBytes(entry.size),
       entry.mod_time ? formatDateTime(entry.mod_time) : "",
@@ -3397,7 +3398,7 @@
     return React.createElement(
       "button",
       {
-        className: `folder-browser-file-entry-row folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}${canPreview ? " previewable" : ""}`,
+        className: `folder-browser-file-entry-row folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}${contextSelected ? " context-selected" : ""}`,
         title: canPreview ? `${title} · ${previewLabel}` : entry.path,
         onClick,
         onContextMenu: (event) => onContextMenu(event, item),
@@ -3408,8 +3409,8 @@
       },
       React.createElement(
         "span",
-        { className: "folder-browser-file-entry-row-icon" },
-        isDirectory ? "DIR" : (canPreview ? (previewKindForEntry(entry) === "pdf" ? "PDF" : "TXT") : (extension || entry.media_type || "FILE"))
+        { className: `folder-browser-file-entry-row-icon${canPreview ? ` preview-${previewKind}` : ""}` },
+        isDirectory ? "DIR" : (canPreview ? (previewKind === "pdf" ? "PDF" : "TXT") : (extension || entry.media_type || "FILE"))
       ),
       React.createElement(
         "span",
@@ -3420,7 +3421,7 @@
     );
   }
 
-  function OtherEntryList({ items, onOpen, onContextMenu }) {
+  function OtherEntryList({ items, activePath, onOpen, onContextMenu }) {
     return React.createElement(
       "div",
       { className: "folder-browser-file-entry-list" },
@@ -3428,6 +3429,7 @@
         React.createElement(OtherEntryRow, {
           key: item.entry.path,
           item,
+          activePath,
           onOpen,
           onContextMenu,
         })
@@ -3563,7 +3565,7 @@
       React.createElement(
         "div",
         { className: "folder-browser-toolbar-head" },
-        React.createElement("div", { className: "folder-browser-toolbar-title", title: currentFolder?.path }, currentFolder ? currentFolder.basename || currentFolder.path : "未选择目录"),
+        React.createElement("div", { className: "folder-browser-toolbar-title", title: currentFolder?.path }, currentFolder ? currentFolder.basename || currentFolder.path : "未选择文件夹"),
         React.createElement(
           "button",
           {
@@ -3578,7 +3580,7 @@
           ? React.createElement(
               "div",
               { className: "folder-browser-toolbar-menu" },
-              action("新建目录", onCreateFolder, { disabled: !currentFolder }),
+              action("新建文件夹", onCreateFolder, { disabled: !currentFolder }),
               action("上传文件", onUploadFiles, { disabled: !currentFolder }),
               action("上传文件夹", onUploadFolder, { disabled: !currentFolder }),
               action("下载", onDownload, { disabled: !selectedImageCount }),
@@ -5557,7 +5559,7 @@
     }
 
     async function createFolderAt(path) {
-      const basename = window.prompt("新目录名");
+      const basename = window.prompt("新文件夹名");
       if (!basename) return;
       setLoading(true);
       setError("");
@@ -5817,13 +5819,31 @@
         actions: [
           { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
           ...(!isDirectory ? [{ label: "下载", onClick: () => downloadFileEntry(entry) }] : []),
-          ...(isDirectory ? [{ label: "新建目录", onClick: () => createFolderAt(entry.path) }] : []),
+          ...(isDirectory ? [{ label: "新建文件夹", onClick: () => createFolderAt(entry.path) }] : []),
           ...(isDirectory ? [{ label: "上传文件", onClick: () => uploadFilesHere(entry.path) }] : []),
           ...(isDirectory ? [{ label: "上传文件夹", onClick: () => uploadFolderHere(entry.path) }] : []),
           { label: "移动", onClick: () => moveFileEntry(item) },
           { label: "复制到", onClick: () => copyFileEntry(item) },
           { label: "重命名", onClick: () => renameFileEntry(item) },
           { label: "删除", danger: true, onClick: () => deleteFileEntry(item) },
+        ],
+      });
+    }
+
+    function openCurrentFolderContextMenu(event) {
+      if (activeView !== "other" || !currentFolder?.path) return;
+      if (event.target.closest?.(".folder-browser-file-entry-row, .folder-browser-context-menu")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu({
+        kind: "current-folder",
+        item: { entry: folderActionEntry(currentFolder) },
+        x: Math.min(event.clientX, window.innerWidth - 190),
+        y: Math.min(event.clientY, window.innerHeight - 180),
+        actions: [
+          { label: "新建文件夹", onClick: () => createFolderAt(currentFolder.path) },
+          { label: "上传文件", onClick: () => uploadFilesHere(currentFolder.path) },
+          { label: "上传文件夹", onClick: () => uploadFolderHere(currentFolder.path) },
         ],
       });
     }
@@ -5840,7 +5860,7 @@
         y: Math.min(event.clientY, window.innerHeight - 230),
         actions: [
           { label: "打开", onClick: () => onSelectFolder(folder) },
-          { label: "新建目录", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
+          { label: "新建文件夹", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
           { label: "上传文件", disabled: !folder?.path, onClick: () => uploadFilesHere(folder.path) },
           { label: "上传文件夹", disabled: !folder?.path, onClick: () => uploadFolderHere(folder.path) },
           { label: "移动", disabled: !canMutate, onClick: () => moveFileEntry({ entry }) },
@@ -6526,6 +6546,7 @@
 
     function renderOtherSection() {
       if (!showOtherSection) return null;
+      const activePath = contextMenu?.kind === "entry" ? contextMenu.item?.entry?.path : "";
       return React.createElement(
         "section",
         { className: "folder-browser-section", key: "other" },
@@ -6535,6 +6556,7 @@
         }),
         React.createElement(OtherEntryList, {
           items: otherEntryItems,
+          activePath,
           onOpen: openFileEntry,
           onContextMenu: openFileEntryContextMenu,
         })
@@ -6641,6 +6663,7 @@
               onClick: (event) => {
                 if (!event.target.closest?.(".folder-browser-wall-tile")) setTouchPreviewSceneID(null);
               },
+              onContextMenu: openCurrentFolderContextMenu,
               onScroll: () => {
                 handleScrollAreaScroll();
                 setContextMenu(null);
@@ -6664,8 +6687,8 @@
                     : activeView === "image"
                       ? "This folder has no scanned images."
                       : activeView === "other"
-                        ? "当前目录没有其他文件。"
-                        : "当前目录没有可显示条目。"
+                        ? "当前文件夹没有其他文件。"
+                        : "当前文件夹没有可显示条目。"
                 )
               : null
           ),
@@ -6692,7 +6715,7 @@
           }),
           React.createElement(MoveTargetDialog, {
             open: Boolean(moveDialog),
-            title: moveDialog?.title || "选择目标目录",
+            title: moveDialog?.title || "选择目标文件夹",
             confirmLabel: moveDialog?.confirmLabel,
             folderTree,
             selectedFolderID: moveTargetFolderID,
