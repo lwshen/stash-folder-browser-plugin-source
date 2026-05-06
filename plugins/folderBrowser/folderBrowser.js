@@ -3247,6 +3247,7 @@
     const gestureRef = React.useRef(null);
     const imageRef = React.useRef(null);
     const displaySrcRef = React.useRef("");
+    const preloadImagesRef = React.useRef(new Map());
     const pointersRef = React.useRef(new Map());
     const lastTapRef = React.useRef(null);
     const lastPointerTypeRef = React.useRef("mouse");
@@ -3301,10 +3302,10 @@
         displaySrcRef.current = "";
         return undefined;
       }
-      const previewSrc = item.preview || item.thumb || item.full || item.original || "";
-      const fullSrc = item.full || item.original || previewSrc;
+      const previewSrc = lightboxPreviewSrc(item);
+      const fullSrc = lightboxFullSrc(item);
       let cancelled = false;
-      function swapImage(src, fade = true) {
+      function swapImage(src) {
         if (cancelled || !src) return;
         if (src === displaySrcRef.current) {
           setImageReady(true);
@@ -3314,7 +3315,7 @@
         setImageReady(false);
         setDisplaySrc(src);
       }
-      swapImage(previewSrc, true);
+      swapImage(previewSrc);
       if (!fullSrc || fullSrc === previewSrc) return undefined;
       const image = new Image();
       image.onload = async () => {
@@ -3323,16 +3324,41 @@
         } catch (e) {
           // The load event is enough when decode() is not available or rejects.
         }
-        swapImage(fullSrc, true);
+        swapImage(fullSrc);
       };
       image.onerror = () => {
-        swapImage(previewSrc, false);
+        swapImage(previewSrc);
       };
       image.src = fullSrc;
       return () => {
         cancelled = true;
       };
     }, [item]);
+
+    React.useEffect(() => {
+      if (!item || !items.length || index === null) return;
+      const cache = preloadImagesRef.current;
+      const neighborItems = [
+        items[(index - 1 + items.length) % items.length],
+        items[(index + 1) % items.length],
+      ].filter(Boolean);
+      const sources = [...new Set(neighborItems.map(lightboxFullSrc).filter(Boolean))];
+      sources.forEach((src) => {
+        if (cache.has(src)) return;
+        const image = new Image();
+        image.decoding = "async";
+        image.src = src;
+        const decodePromise = image.decode?.();
+        decodePromise?.catch?.(() => {});
+        cache.set(src, image);
+      });
+      const keep = new Set([lightboxFullSrc(item), ...sources].filter(Boolean));
+      for (const src of cache.keys()) {
+        if (keep.has(src)) continue;
+        cache.delete(src);
+        if (cache.size <= 6) break;
+      }
+    }, [item, index, items]);
 
     React.useEffect(() => {
       setZoom(1);
@@ -3391,6 +3417,14 @@
     function clearChromeTimer() {
       window.clearTimeout(chromeTimerRef.current);
       chromeTimerRef.current = 0;
+    }
+
+    function lightboxPreviewSrc(imageItem) {
+      return imageItem?.preview || imageItem?.thumb || imageItem?.full || imageItem?.original || "";
+    }
+
+    function lightboxFullSrc(imageItem) {
+      return imageItem?.full || imageItem?.original || lightboxPreviewSrc(imageItem);
     }
 
     function hideChrome() {
