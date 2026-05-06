@@ -3086,6 +3086,12 @@
   }
 
   function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, topSpacer, bottomSpacer, innerRef, onOpen, onSelectionChange, onContextMenu }) {
+    const mouseOpenRef = React.useRef(null);
+
+    function shouldIgnoreImageOpen(event) {
+      return Boolean(event.target.closest?.(".folder-browser-media-check"));
+    }
+
     return React.createElement(
       "div",
       {
@@ -3098,17 +3104,36 @@
         const selected = selectedIDs.includes(item.imageID);
         return (
         React.createElement(
-          "button",
+          "div",
           {
-            type: "button",
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
             "data-folder-browser-image-id": item.imageID,
-            onClick: () => onOpen(item),
+            role: "button",
+            tabIndex: 0,
+            onMouseDown: (event) => {
+              if (event.button !== 0 || shouldIgnoreImageOpen(event)) return;
+              mouseOpenRef.current = item.imageID;
+              event.preventDefault();
+              onOpen(item);
+            },
+            onClick: (event) => {
+              if (mouseOpenRef.current === item.imageID) {
+                mouseOpenRef.current = null;
+                event.preventDefault();
+                return;
+              }
+              if (shouldIgnoreImageOpen(event)) return;
+              onOpen(item);
+            },
+            onKeyDown: (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onOpen(item);
+            },
             onPointerUp: (event) => {
               if (event.pointerType !== "mouse" || event.button !== 0) return;
-              if (event.target.closest?.(".folder-browser-media-check")) return;
-              onOpen(item);
+              if (shouldIgnoreImageOpen(event)) return;
             },
             onContextMenu: (event) => onContextMenu(event, item),
             style: { "--folder-wall-aspect": imageAspect(item) },

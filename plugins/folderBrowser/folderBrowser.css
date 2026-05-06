@@ -11,7 +11,6 @@
   min-height: calc(100vh - 8rem);
   overflow: hidden;
   padding-left: calc(var(--folder-browser-sidebar-width) + 1rem);
-  pointer-events: none;
 }
 
 .folder-browser-page.sidebar-collapsed .folder-browser-shell {
@@ -21,7 +20,6 @@
 .folder-browser-sidebar,
 .folder-browser-content {
   min-width: 0;
-  pointer-events: auto;
 }
 
 .folder-browser-sidebar {
@@ -104,7 +102,7 @@
   position: fixed;
   right: 1rem;
   top: 4.25rem;
-  z-index: 20;
+  z-index: 80;
 }
 
 .folder-browser-page.sidebar-collapsed .folder-browser-content {
