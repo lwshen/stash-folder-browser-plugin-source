@@ -3243,9 +3243,12 @@
     const [displaySrc, setDisplaySrc] = React.useState("");
     const [imageReady, setImageReady] = React.useState(false);
     const [currentOriginalReadySrc, setCurrentOriginalReadySrc] = React.useState("");
+    const [imageDisplayBox, setImageDisplayBox] = React.useState(null);
+    const [loadedOriginalInfo, setLoadedOriginalInfo] = React.useState(null);
     const [chromeVisible, setChromeVisible] = React.useState(true);
     const [hoverZone, setHoverZone] = React.useState(null);
     const gestureRef = React.useRef(null);
+    const stageRef = React.useRef(null);
     const imageRef = React.useRef(null);
     const displaySrcRef = React.useRef("");
     const preloadImagesRef = React.useRef(new Map());
@@ -3301,6 +3304,8 @@
         setDisplaySrc("");
         setImageReady(false);
         setCurrentOriginalReadySrc("");
+        setImageDisplayBox(null);
+        setLoadedOriginalInfo(null);
         displaySrcRef.current = "";
         return undefined;
       }
@@ -3308,6 +3313,7 @@
       const fullSrc = lightboxFullSrc(item);
       let cancelled = false;
       setCurrentOriginalReadySrc("");
+      setLoadedOriginalInfo(null);
       function swapImage(src) {
         if (cancelled || !src) return;
         if (src === displaySrcRef.current) {
@@ -3331,6 +3337,9 @@
         } catch (e) {
           // The load event is enough when decode() is not available or rejects.
         }
+        if (!cancelled && image.naturalWidth && image.naturalHeight) {
+          setLoadedOriginalInfo({ src: fullSrc, width: image.naturalWidth, height: image.naturalHeight });
+        }
         swapImage(fullSrc);
         if (!cancelled) setCurrentOriginalReadySrc(fullSrc);
       };
@@ -3344,6 +3353,44 @@
         cancelImageLoad(image);
       };
     }, [item]);
+
+    React.useLayoutEffect(() => {
+      if (!item) {
+        setImageDisplayBox(null);
+        return undefined;
+      }
+      const size = lightboxOriginalSize(item);
+      const stage = stageRef.current;
+      if (!size || !stage) {
+        setImageDisplayBox(null);
+        return undefined;
+      }
+      let frame = 0;
+      function updateBox() {
+        window.cancelAnimationFrame(frame);
+        frame = window.requestAnimationFrame(() => {
+          const rect = stage.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          const scale = Math.min(1, rect.width / size.width, rect.height / size.height);
+          const next = {
+            width: Math.max(1, Math.round(size.width * scale)),
+            height: Math.max(1, Math.round(size.height * scale)),
+          };
+          setImageDisplayBox((current) =>
+            current?.width === next.width && current?.height === next.height ? current : next
+          );
+        });
+      }
+      updateBox();
+      const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateBox) : null;
+      observer?.observe(stage);
+      window.addEventListener("resize", updateBox);
+      return () => {
+        window.cancelAnimationFrame(frame);
+        observer?.disconnect();
+        window.removeEventListener("resize", updateBox);
+      };
+    }, [detailsOpen, item, landscape, loadedOriginalInfo]);
 
     React.useEffect(() => {
       const cache = preloadImagesRef.current;
@@ -3453,6 +3500,17 @@
 
     function lightboxFullSrc(imageItem) {
       return imageItem?.full || imageItem?.original || lightboxPreviewSrc(imageItem);
+    }
+
+    function lightboxOriginalSize(imageItem) {
+      const fullSrc = lightboxFullSrc(imageItem);
+      if (loadedOriginalInfo?.src === fullSrc && loadedOriginalInfo.width && loadedOriginalInfo.height) {
+        return { width: loadedOriginalInfo.width, height: loadedOriginalInfo.height };
+      }
+      if (imageItem?.width && imageItem?.height) {
+        return { width: imageItem.width, height: imageItem.height };
+      }
+      return null;
     }
 
     function setImageLoadPriority(image, priority) {
@@ -3886,6 +3944,7 @@
           React.createElement(
             "div",
             {
+              ref: stageRef,
               className: "folder-browser-lightbox-stage",
               onWheel,
               onPointerDown,
@@ -3916,6 +3975,8 @@
                 "--folder-lightbox-zoom": zoom,
                 "--folder-lightbox-pan-x": `${pan.x}px`,
                 "--folder-lightbox-pan-y": `${pan.y}px`,
+                "--folder-lightbox-display-width": imageDisplayBox ? `${imageDisplayBox.width}px` : undefined,
+                "--folder-lightbox-display-height": imageDisplayBox ? `${imageDisplayBox.height}px` : undefined,
               },
             }),
             React.createElement(

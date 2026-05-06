@@ -1225,8 +1225,8 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
 }
 
 .folder-browser-lightbox-image.preview {
-  height: 100%;
-  width: 100%;
+  height: var(--folder-lightbox-display-height, auto);
+  width: var(--folder-lightbox-display-width, auto);
 }
 
 .folder-browser-lightbox-image.current {
