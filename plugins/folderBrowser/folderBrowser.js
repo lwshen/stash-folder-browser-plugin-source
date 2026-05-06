@@ -786,7 +786,6 @@
         meta: file?.width && file?.height ? `${file.width}x${file.height}` : "",
         width: file?.width,
         height: file?.height,
-        isHEIF: isHEIFFile(file),
         thumb: image.paths?.thumbnail || image.paths?.preview || image.paths?.image,
         preview: previewPath,
         full: displayPath,
@@ -3866,6 +3865,10 @@
         cancelImagePreloads(cache, new Set());
         return;
       }
+      if (isMobileLayout) {
+        cancelImagePreloads(cache, new Set());
+        return;
+      }
       const currentSrc = lightboxFullSrc(item);
       if (currentOriginalReadySrc !== currentSrc) {
         cancelImagePreloads(cache, new Set());
@@ -3967,9 +3970,6 @@
     }
 
     function lightboxFullSrc(imageItem) {
-      if (isMobileLayout && imageItem?.isHEIF) {
-        return lightboxPreviewSrc(imageItem);
-      }
       return imageItem?.full || imageItem?.original || lightboxPreviewSrc(imageItem);
     }
 
