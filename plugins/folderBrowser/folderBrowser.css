@@ -935,13 +935,21 @@
   position: fixed;
   touch-action: none;
   user-select: none;
-  z-index: 5000;
+  z-index: 9000;
 }
 
 body.folder-browser-lightbox-open {
+  background: #000 !important;
   overflow: hidden !important;
   overscroll-behavior: none;
+  padding: 0 !important;
   touch-action: none;
+}
+
+body.folder-browser-lightbox-open .top-nav,
+body.folder-browser-lightbox-open .navbar.fixed-top,
+body.folder-browser-lightbox-open header.navbar {
+  display: none !important;
 }
 
 .folder-browser-lightbox-backdrop {
@@ -1321,11 +1329,11 @@ body.folder-browser-lightbox-open {
 }
 
 body.folder-browser-lightbox-open .folder-browser-dialog {
-  z-index: 6100;
+  z-index: 9100;
 }
 
 body.folder-browser-lightbox-open .folder-browser-error {
-  z-index: 6200;
+  z-index: 9200;
 }
 
 .folder-browser-dialog-backdrop {
