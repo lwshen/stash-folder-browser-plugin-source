@@ -11,6 +11,7 @@
   min-height: calc(100vh - 8rem);
   overflow: hidden;
   padding-left: calc(var(--folder-browser-sidebar-width) + 1rem);
+  pointer-events: none;
 }
 
 .folder-browser-page.sidebar-collapsed .folder-browser-shell {
@@ -20,6 +21,7 @@
 .folder-browser-sidebar,
 .folder-browser-content {
   min-width: 0;
+  pointer-events: auto;
 }
 
 .folder-browser-sidebar {
@@ -102,6 +104,7 @@
   position: fixed;
   right: 1rem;
   top: 4.25rem;
+  z-index: 20;
 }
 
 .folder-browser-page.sidebar-collapsed .folder-browser-content {
@@ -369,6 +372,20 @@
   white-space: nowrap;
 }
 
+.folder-browser-path-crumb.current {
+  color: #fff !important;
+  cursor: default;
+  font-weight: 700;
+  opacity: 1;
+  text-decoration: none;
+}
+
+.folder-browser-path-crumb.current:hover,
+.folder-browser-path-crumb.current:focus {
+  color: #fff !important;
+  text-decoration: none;
+}
+
 .folder-browser-path-separator {
   color: rgba(255, 255, 255, 0.54);
   line-height: 1;
@@ -427,6 +444,31 @@
 
 .folder-browser-copy-jobs-button.failed {
   color: #ffb2bc;
+}
+
+.folder-browser-preview-toggle {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.78);
+  display: inline-flex;
+  height: 2rem;
+  justify-content: center;
+  padding: 0;
+  width: 2rem;
+}
+
+.folder-browser-preview-toggle:hover,
+.folder-browser-preview-toggle:focus {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+.folder-browser-preview-toggle.active {
+  background: rgba(13, 110, 253, 0.28);
+  border-color: rgba(126, 180, 255, 0.64);
+  color: #b9d5ff;
 }
 
 .folder-browser-copy-jobs-icon {

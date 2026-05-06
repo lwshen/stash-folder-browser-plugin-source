@@ -1153,11 +1153,11 @@
         {
           key: folder.id,
           size: "sm",
-          variant: isCurrent ? "primary" : "link",
-          disabled: isCurrent,
+          variant: "link",
+          "aria-current": isCurrent ? "page" : undefined,
           onClick: isCurrent ? undefined : () => onOpen(folder),
           title: folder.path,
-          className: "folder-browser-path-crumb",
+          className: "folder-browser-path-crumb" + (isCurrent ? " current" : ""),
         },
         name
       );
@@ -1177,6 +1177,18 @@
         "div",
         { className: "folder-browser-view-buttons" },
         React.createElement(CopyJobIndicator, { jobs: copyJobs, onClear: onClearCopyJobs }),
+        activeView === "video"
+          ? React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "folder-browser-preview-toggle" + (previewAllVisible ? " active" : ""),
+                onClick: () => onPreviewAllVisibleChange(!previewAllVisible),
+                title: previewAllVisible ? "关闭自动播放可见预览" : "打开自动播放可见预览",
+              },
+              iconNode(previewAllVisible ? faPause : faPlay, previewAllVisible ? "Ⅱ" : "▶")
+            )
+          : null,
         onSelectAllChange
           ? React.createElement(
               "label",
@@ -1231,17 +1243,6 @@
           },
           "包括子文件夹"
         ),
-        activeView === "video"
-          ? React.createElement(
-              Button,
-              {
-                size: "sm",
-                variant: previewAllVisible ? "primary" : "secondary",
-                onClick: () => onPreviewAllVisibleChange(!previewAllVisible),
-              },
-              "自动播放可见预览"
-            )
-          : null,
         React.createElement(
           Button,
           {
@@ -3084,7 +3085,7 @@
     document.addEventListener("webkitbeginfullscreen", lockCurrentOrientation, true);
   }
 
-  function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, startIndex = 0, topSpacer, bottomSpacer, innerRef, onOpen, onSelectionChange, onContextMenu }) {
+  function ImageWall({ items, wallHeight, mobileColumns, fillTail, selectedIDs, topSpacer, bottomSpacer, innerRef, onOpen, onSelectionChange, onContextMenu }) {
     return React.createElement(
       "div",
       {
@@ -3103,11 +3104,11 @@
             key: item.id,
             className: "folder-browser-wall-tile folder-browser-image-tile" + (selected ? " selected" : ""),
             "data-folder-browser-image-id": item.imageID,
-            onClick: () => onOpen(startIndex + index),
+            onClick: () => onOpen(item),
             onPointerUp: (event) => {
               if (event.pointerType !== "mouse" || event.button !== 0) return;
               if (event.target.closest?.(".folder-browser-media-check")) return;
-              onOpen(startIndex + index);
+              onOpen(item);
             },
             onContextMenu: (event) => onContextMenu(event, item),
             style: { "--folder-wall-aspect": imageAspect(item) },
@@ -3313,8 +3314,21 @@
         if (rootRef.current?.contains(event.target)) return;
         setMenuOpen(false);
       }
+      function closeOnEscape(event) {
+        if (event.key === "Escape") setMenuOpen(false);
+      }
       window.addEventListener("pointerdown", closeOnOutside, true);
-      return () => window.removeEventListener("pointerdown", closeOnOutside, true);
+      window.addEventListener("mousedown", closeOnOutside, true);
+      window.addEventListener("touchstart", closeOnOutside, true);
+      window.addEventListener("click", closeOnOutside, true);
+      window.addEventListener("keydown", closeOnEscape, true);
+      return () => {
+        window.removeEventListener("pointerdown", closeOnOutside, true);
+        window.removeEventListener("mousedown", closeOnOutside, true);
+        window.removeEventListener("touchstart", closeOnOutside, true);
+        window.removeEventListener("click", closeOnOutside, true);
+        window.removeEventListener("keydown", closeOnEscape, true);
+      };
     }, [menuOpen]);
 
     function action(label, onClick, options = {}) {
@@ -4835,7 +4849,7 @@
       () =>
         fileEntryItems.filter((item) => {
           const entry = item.entry;
-          const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+          const isDirectory = isDirectoryEntry(entry);
           return isDirectory || !["VIDEO", "IMAGE"].includes(entry.media_type);
         }),
       [fileEntryItems]
@@ -4982,6 +4996,11 @@
       if (item) persistFolderState({ activeView: "image", lastOpenedImageID: item.imageID });
       setLightboxIndex(index);
     }, [lightboxImages, persistFolderState]);
+
+    const openImageItem = React.useCallback((item) => {
+      const index = lightboxImages.findIndex((image) => image.imageID === item?.imageID);
+      if (index >= 0) openImagePreview(index);
+    }, [lightboxImages, openImagePreview]);
 
     const closeImagePreview = React.useCallback(() => {
       const item = lightboxIndex === null ? null : lightboxImages[lightboxIndex];
@@ -5962,11 +5981,10 @@
           mobileColumns: isMobileLayout ? imageSizePreset.columns : undefined,
           fillTail: images.length >= imageTotal,
           selectedIDs: selectedImageIDs,
-          startIndex: renderImageWindow.startIndex,
           topSpacer: renderImageWindow.topSpacer,
           bottomSpacer: renderImageWindow.bottomSpacer,
           innerRef: imageWallRef,
-          onOpen: openImagePreview,
+          onOpen: openImageItem,
           onSelectionChange: toggleImageSelection,
           onContextMenu: (event, item) => openMediaContextMenu(event, "image", item),
         }),
