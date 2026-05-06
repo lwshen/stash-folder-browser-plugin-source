@@ -1032,6 +1032,16 @@
   outline: none;
 }
 
+.folder-browser-file-entry-row.previewable {
+  background: rgba(13, 110, 253, 0.07);
+  box-shadow: inset 3px 0 0 rgba(126, 180, 255, 0.88);
+}
+
+.folder-browser-file-entry-row.previewable:hover,
+.folder-browser-file-entry-row.previewable:focus-visible {
+  background: rgba(13, 110, 253, 0.14);
+}
+
 .folder-browser-file-entry-row-icon {
   align-items: center;
   background: rgba(255, 255, 255, 0.075);
@@ -1052,6 +1062,16 @@
 .folder-browser-file-entry-row.folder-browser-file-entry-directory .folder-browser-file-entry-row-icon {
   background: rgba(13, 110, 253, 0.2);
   color: rgba(214, 231, 255, 0.96);
+}
+
+.folder-browser-file-entry-row.previewable .folder-browser-file-entry-row-icon {
+  background: rgba(126, 180, 255, 0.22);
+  border: 1px solid rgba(126, 180, 255, 0.48);
+  color: #d6e7ff;
+}
+
+.folder-browser-file-entry-row.previewable .folder-browser-file-entry-meta {
+  color: rgba(214, 231, 255, 0.78);
 }
 
 .folder-browser-scroll-area {

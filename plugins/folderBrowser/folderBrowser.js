@@ -986,6 +986,17 @@
     return Boolean(previewKindForEntry(entry));
   }
 
+  function previewLabelForEntry(entry) {
+    switch (previewKindForEntry(entry)) {
+      case "pdf":
+        return "PDF 预览";
+      case "text":
+        return "文本预览";
+      default:
+        return "";
+    }
+  }
+
   function folderBrowserFileURL(filePath, options = {}) {
     const endpoint = `${baseURL.replace(/\/$/, "")}/folder-browser/file`;
     const query = new URLSearchParams({ path: filePath || "" });
@@ -3338,7 +3349,10 @@
     const isDirectory = isDirectoryEntry(entry);
     const title = entry.basename || pathBasename(entry.path);
     const extension = String(entry.extension || "").replace(/^\./, "");
+    const previewLabel = previewLabelForEntry(entry);
+    const canPreview = Boolean(previewLabel);
     const meta = [
+      previewLabel,
       mediaTypeLabel(entry),
       isDirectory ? "" : formatBytes(entry.size),
       entry.mod_time ? formatDateTime(entry.mod_time) : "",
@@ -3383,8 +3397,8 @@
     return React.createElement(
       "button",
       {
-        className: `folder-browser-file-entry-row folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}`,
-        title: entry.path,
+        className: `folder-browser-file-entry-row folder-browser-file-entry-${String(entry.media_type || entry.type || "file").toLowerCase()}${canPreview ? " previewable" : ""}`,
+        title: canPreview ? `${title} · ${previewLabel}` : entry.path,
         onClick,
         onContextMenu: (event) => onContextMenu(event, item),
         onPointerDown,
@@ -3395,7 +3409,7 @@
       React.createElement(
         "span",
         { className: "folder-browser-file-entry-row-icon" },
-        isDirectory ? "DIR" : (extension || entry.media_type || "FILE")
+        isDirectory ? "DIR" : (canPreview ? (previewKindForEntry(entry) === "pdf" ? "PDF" : "TXT") : (extension || entry.media_type || "FILE"))
       ),
       React.createElement(
         "span",
