@@ -4484,6 +4484,7 @@
     }
 
     function onSelectFolder(folder) {
+      setContextMenu(null);
       setCurrentFolder(findTreeNode(folderTree, folder.id) || folder);
       if (isMobileLayout) {
         setMobileFoldersOpen(false);
