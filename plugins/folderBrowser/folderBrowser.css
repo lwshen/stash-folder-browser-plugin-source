@@ -1986,6 +1986,62 @@ body.folder-browser-lightbox-open .folder-browser-error {
   margin: 0 0 0.75rem;
 }
 
+.folder-browser-properties-panel {
+  max-width: min(94vw, 42rem);
+  width: 42rem;
+}
+
+.folder-browser-properties-head {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+}
+
+.folder-browser-properties-head h3 {
+  margin: 0;
+}
+
+.folder-browser-properties-head button {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+  display: inline-flex;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.folder-browser-properties-list {
+  display: grid;
+  gap: 0.55rem 1rem;
+  grid-template-columns: minmax(6.5rem, max-content) minmax(0, 1fr);
+  margin: 0;
+}
+
+.folder-browser-properties-list dt {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+}
+
+.folder-browser-properties-list dd {
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.folder-browser-properties-note {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.82rem;
+  margin-top: 0.9rem;
+}
+
 .folder-browser-target-tree {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0.3rem;

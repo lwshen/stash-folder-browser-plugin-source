@@ -458,9 +458,17 @@
             path
             basename
             duration
+            format
             width
             height
             size
+            video_codec
+            audio_codec
+            frame_rate
+            bit_rate
+            mod_time
+            created_at
+            updated_at
             parent_folder { id path }
             fingerprints { type value }
           }
@@ -670,6 +678,20 @@
     const secs = total % 60;
     if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
     return `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+
+  function formatBitrate(value) {
+    const bitrate = Number(value);
+    if (!Number.isFinite(bitrate) || bitrate <= 0) return "";
+    if (bitrate >= 1000 * 1000) return `${(bitrate / 1000 / 1000).toFixed(2)} Mbps`;
+    if (bitrate >= 1000) return `${(bitrate / 1000).toFixed(0)} Kbps`;
+    return `${bitrate} bps`;
+  }
+
+  function formatFrameRate(value) {
+    const frameRate = Number(value);
+    if (!Number.isFinite(frameRate) || frameRate <= 0) return "";
+    return `${Number.isInteger(frameRate) ? frameRate : frameRate.toFixed(2)} fps`;
   }
 
   function formatDateTime(value) {
@@ -3437,7 +3459,7 @@
     );
   }
 
-  function ContextMenu({ menu, onOpen, onDownload, onRename, onMove, onCopy, onDelete, onClose }) {
+  function ContextMenu({ menu, onOpen, onDownload, onRename, onMove, onCopy, onDelete, onProperties, onClose }) {
     if (!menu) return null;
 
     function stopMenuEvent(event) {
@@ -3493,6 +3515,7 @@
         onContextMenu: (event) => event.preventDefault(),
       },
       item("打开", onOpen),
+      item("属性", onProperties),
       item("下载", onDownload),
       item("移动", onMove),
       item("复制到", onCopy),
@@ -4594,6 +4617,194 @@
       : previewNode;
   }
 
+  function propertyEntry(target) {
+    if (!target) return null;
+    if (target.kind === "video") return primarySceneFile(target.item);
+    if (target.kind === "image") {
+      const file = primaryImageFile(target.item?.image);
+      return {
+        ...(file || {}),
+        path: file?.path || target.item?.path,
+        basename: file?.basename || target.item?.basename || target.item?.title,
+        size: file?.size || target.item?.size,
+        width: file?.width || target.item?.width,
+        height: file?.height || target.item?.height,
+      };
+    }
+    return target.entry || target.item?.entry || null;
+  }
+
+  async function collectFolderProperties(path, onProgress, isCancelled) {
+    const stats = {
+      totalSize: 0,
+      fileCount: 0,
+      folderCount: 0,
+      videoCount: 0,
+      imageCount: 0,
+      galleryCount: 0,
+      otherCount: 0,
+      scannedFolderCount: 0,
+      errorCount: 0,
+      lastError: "",
+      pendingFolderCount: 0,
+    };
+    const queue = [path];
+    const seen = new Set();
+
+    while (queue.length) {
+      if (isCancelled?.()) return null;
+      const currentPath = queue.shift();
+      if (!currentPath || seen.has(currentPath)) continue;
+      seen.add(currentPath);
+      stats.scannedFolderCount += 1;
+      stats.pendingFolderCount = queue.length;
+
+      try {
+        const data = await callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentPath });
+        const entries = data.folderListEntries?.entries || [];
+        entries.forEach((entry) => {
+          if (isDirectoryEntry(entry)) {
+            stats.folderCount += 1;
+            if (entry.path && !seen.has(entry.path)) queue.push(entry.path);
+            return;
+          }
+          stats.fileCount += 1;
+          stats.totalSize += Number(entry.size) || 0;
+          if (entry.media_type === "VIDEO") stats.videoCount += 1;
+          else if (entry.media_type === "IMAGE") stats.imageCount += 1;
+          else if (entry.media_type === "GALLERY") stats.galleryCount += 1;
+          else stats.otherCount += 1;
+        });
+      } catch (e) {
+        stats.errorCount += 1;
+        stats.lastError = e.message || String(e);
+      }
+
+      stats.pendingFolderCount = queue.length;
+      onProgress?.({ ...stats });
+    }
+
+    return stats;
+  }
+
+  function PropertiesDialog({ target, onClose }) {
+    const entry = propertyEntry(target);
+    const isFolder = isDirectoryEntry(entry);
+    const folderPath = isFolder ? entry?.path : "";
+    const [folderStats, setFolderStats] = React.useState(null);
+    const [folderStatsLoading, setFolderStatsLoading] = React.useState(false);
+
+    React.useEffect(() => {
+      let cancelled = false;
+      setFolderStats(null);
+      setFolderStatsLoading(false);
+      if (!folderPath) return undefined;
+
+      setFolderStatsLoading(true);
+      collectFolderProperties(
+        folderPath,
+        (stats) => {
+          if (!cancelled) setFolderStats(stats);
+        },
+        () => cancelled
+      )
+        .then((stats) => {
+          if (!cancelled && stats) setFolderStats(stats);
+        })
+        .finally(() => {
+          if (!cancelled) setFolderStatsLoading(false);
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }, [folderPath]);
+
+    React.useEffect(() => {
+      if (!target) return undefined;
+      function onKeyDown(event) {
+        if (event.key === "Escape") onClose();
+      }
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [target, onClose]);
+
+    if (!target || !entry) return null;
+
+    const title = entry.basename || target.title || pathBasename(entry.path) || "属性";
+    const extension = String(entry.extension || fileFormat(entry) || "").replace(/^\./, "");
+    const parentPath = entry.parent_path || entry.parent_folder?.path || parentPathForPath(entry.path, entry.basename);
+    const fingerprints = (entry.fingerprints || []).map((fingerprint) => `${fingerprint.type}: ${fingerprint.value}`);
+    const typeLabel = isFolder
+      ? "文件夹"
+      : target.kind === "video"
+        ? "视频"
+        : target.kind === "image"
+          ? "图片"
+          : mediaTypeLabel(entry);
+    const details = [
+      detailRow("名称", title),
+      detailRow("类型", extension ? `${typeLabel} (${extension.toUpperCase()})` : typeLabel),
+      detailRow("位置", parentPath),
+      detailRow("路径", entry.path),
+      isFolder ? null : detailRow("大小", formatBytes(entry.size) || "0 B"),
+      detailRow("修改日期", formatDateTime(entry.mod_time)),
+      detailRow("创建日期", formatDateTime(entry.created_at)),
+      detailRow("更新日期", formatDateTime(entry.updated_at)),
+      entry.width && entry.height ? detailRow("分辨率", `${entry.width}x${entry.height}`) : null,
+      entry.duration || entry.duration === 0 ? detailRow("时长", formatDuration(entry.duration)) : null,
+      entry.format ? detailRow("格式", entry.format) : null,
+      entry.video_codec ? detailRow("视频编码", entry.video_codec) : null,
+      entry.audio_codec ? detailRow("音频编码", entry.audio_codec) : null,
+      entry.frame_rate ? detailRow("帧率", formatFrameRate(entry.frame_rate)) : null,
+      entry.bit_rate ? detailRow("码率", formatBitrate(entry.bit_rate)) : null,
+      fingerprints.length ? detailRow("指纹", fingerprints) : null,
+    ].filter(Boolean);
+
+    const folderDetails = isFolder
+      ? [
+          detailRow("包含", folderStats
+            ? `${folderStats.fileCount} 个文件，${folderStats.folderCount} 个文件夹`
+            : "正在计算..."),
+          detailRow("文件数量", folderStats ? `${folderStats.fileCount}` : "正在计算..."),
+          detailRow("文件夹数量", folderStats ? `${folderStats.folderCount}` : "正在计算..."),
+          detailRow("媒体", folderStats
+            ? `${folderStats.videoCount} 个视频，${folderStats.imageCount} 个图片，${folderStats.otherCount} 个其他文件`
+            : "正在计算..."),
+          detailRow("合计大小", folderStats ? formatBytes(folderStats.totalSize) || "0 B" : "正在计算..."),
+          detailRow("占用空间", folderStats ? `${formatBytes(folderStats.totalSize) || "0 B"}（估算）` : "正在计算..."),
+          detailRow("已检查文件夹", folderStats
+            ? `${folderStats.scannedFolderCount}${folderStatsLoading ? `，待检查 ${folderStats.pendingFolderCount}` : ""}`
+            : "0"),
+          folderStats?.errorCount ? detailRow("统计错误", `${folderStats.errorCount} 个文件夹读取失败：${folderStats.lastError}`) : null,
+        ].filter(Boolean)
+      : [];
+
+    const node = React.createElement(
+      "div",
+      { className: "folder-browser-dialog folder-browser-properties-dialog" },
+      React.createElement("div", { className: "folder-browser-dialog-backdrop", onClick: onClose }),
+      React.createElement(
+        "div",
+        { className: "folder-browser-dialog-panel folder-browser-properties-panel" },
+        React.createElement(
+          "div",
+          { className: "folder-browser-properties-head" },
+          React.createElement("h3", null, "属性"),
+          React.createElement("button", { type: "button", onClick: onClose, "aria-label": "关闭" }, "×")
+        ),
+        React.createElement("dl", { className: "folder-browser-properties-list" }, details, folderDetails),
+        isFolder && folderStatsLoading
+          ? React.createElement("div", { className: "folder-browser-properties-note" }, "正在递归统计文件夹内容...")
+          : null
+      )
+    );
+
+    return ReactDOM?.createPortal
+      ? ReactDOM.createPortal(node, document.body)
+      : node;
+  }
+
   function FolderBrowserPage() {
     const savedStateRef = React.useRef(readFolderBrowserState());
     const restoreContentRef = React.useRef(true);
@@ -4639,6 +4850,7 @@
     const [touchPreviewSceneID, setTouchPreviewSceneID] = React.useState(null);
     const [slideshow, setSlideshow] = React.useState(false);
     const [filePreview, setFilePreview] = React.useState(null);
+    const [propertiesTarget, setPropertiesTarget] = React.useState(null);
     const [selectedSceneIDs, setSelectedSceneIDs] = React.useState([]);
     const [selectedImageIDs, setSelectedImageIDs] = React.useState([]);
     const [moveDialog, setMoveDialog] = React.useState(null);
@@ -5805,6 +6017,23 @@
       }
     }
 
+    function openFolderProperties(folder = currentFolder) {
+      const entry = folderActionEntry(folder);
+      if (!entry) return;
+      setPropertiesTarget({ kind: "folder", entry, title: entry.basename || pathBasename(entry.path) });
+    }
+
+    function openFileEntryProperties(item) {
+      const entry = item?.entry;
+      if (!entry) return;
+      setPropertiesTarget({
+        kind: isDirectoryEntry(entry) ? "folder" : "file",
+        item,
+        entry,
+        title: entry.basename || pathBasename(entry.path),
+      });
+    }
+
     function openFileEntryContextMenu(event, item) {
       event.preventDefault();
       event.stopPropagation();
@@ -5818,6 +6047,7 @@
         y: Math.min(event.clientY, window.innerHeight - 230),
         actions: [
           { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
+          { label: "属性", onClick: () => openFileEntryProperties(item) },
           ...(!isDirectory ? [{ label: "下载", onClick: () => downloadFileEntry(entry) }] : []),
           ...(isDirectory ? [{ label: "新建文件夹", onClick: () => createFolderAt(entry.path) }] : []),
           ...(isDirectory ? [{ label: "上传文件", onClick: () => uploadFilesHere(entry.path) }] : []),
@@ -5841,6 +6071,7 @@
         x: Math.min(event.clientX, window.innerWidth - 190),
         y: Math.min(event.clientY, window.innerHeight - 180),
         actions: [
+          { label: "属性", onClick: () => openFolderProperties(currentFolder) },
           { label: "新建文件夹", onClick: () => createFolderAt(currentFolder.path) },
           { label: "上传文件", onClick: () => uploadFilesHere(currentFolder.path) },
           { label: "上传文件夹", onClick: () => uploadFolderHere(currentFolder.path) },
@@ -5860,6 +6091,7 @@
         y: Math.min(event.clientY, window.innerHeight - 230),
         actions: [
           { label: "打开", onClick: () => onSelectFolder(folder) },
+          { label: "属性", disabled: !entry, onClick: () => openFolderProperties(folder) },
           { label: "新建文件夹", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
           { label: "上传文件", disabled: !folder?.path, onClick: () => uploadFilesHere(folder.path) },
           { label: "上传文件夹", disabled: !folder?.path, onClick: () => uploadFolderHere(folder.path) },
@@ -5976,6 +6208,17 @@
       if (contextMenu.kind === "image") {
         const index = lightboxImages.findIndex((image) => image.imageID === contextMenu.item.imageID);
         if (index >= 0) openImagePreview(index);
+      }
+    }
+
+    function openContextProperties() {
+      if (!contextMenu?.item) return;
+      if (contextMenu.kind === "video" || contextMenu.kind === "image") {
+        setPropertiesTarget({
+          kind: contextMenu.kind,
+          item: contextMenu.item,
+          title: contextMenu.item.title,
+        });
       }
     }
 
@@ -6713,6 +6956,10 @@
             onClose: () => setFilePreview(null),
             onDownload: downloadFileEntry,
           }),
+          React.createElement(PropertiesDialog, {
+            target: propertiesTarget,
+            onClose: () => setPropertiesTarget(null),
+          }),
           React.createElement(MoveTargetDialog, {
             open: Boolean(moveDialog),
             title: moveDialog?.title || "选择目标文件夹",
@@ -6750,6 +6997,7 @@
           onMove: moveContextMedia,
           onCopy: copyContextMedia,
           onDelete: deleteContextMedia,
+          onProperties: openContextProperties,
           onClose: () => setContextMenu(null),
         })
       );
