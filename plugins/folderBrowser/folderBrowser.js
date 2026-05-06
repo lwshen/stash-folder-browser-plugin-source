@@ -4343,8 +4343,8 @@
         className: lightboxClassName,
         role: "dialog",
         "aria-modal": "true",
-        onMouseMove: revealChrome,
-        onPointerDown: revealChrome,
+        onMouseMove: isMobileLayout ? undefined : revealChrome,
+        onPointerDown: isMobileLayout ? undefined : revealChrome,
         onMouseLeave: () => setHoverZone(null),
       },
       React.createElement("div", { className: "folder-browser-lightbox-backdrop" }),
@@ -4442,12 +4442,6 @@
               onPointerCancel: onPointerUp,
               onContextMenu: closeFromImageContextMenu,
               onMouseLeave: () => setHoverZone(null),
-              onDoubleClick: isMobileLayout
-                ? (event) => {
-                    event.preventDefault();
-                    toggleLandscape();
-                  }
-                : undefined,
             },
             React.createElement("img", {
               key: `original-preload-${item.id}-${lightboxFullSrc(item)}`,
@@ -4480,32 +4474,38 @@
                 "--folder-lightbox-display-height": imageDisplayBox ? `${imageDisplayBox.height}px` : undefined,
               },
             }),
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "folder-browser-lightbox-zone prev" + (hoverZone === "prev" ? " hovered" : ""),
-                onMouseEnter: () => setHoverZone("prev"),
-                onMouseMove: () => setHoverZone("prev"),
-                onMouseLeave: () => setHoverZone((current) => current === "prev" ? null : current),
-                onClick: (event) => navigateFromZone(event, -1),
-                title: "上一张",
-              },
-              React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronLeft, "‹"))
-            ),
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "folder-browser-lightbox-zone next" + (hoverZone === "next" ? " hovered" : ""),
-                onMouseEnter: () => setHoverZone("next"),
-                onMouseMove: () => setHoverZone("next"),
-                onMouseLeave: () => setHoverZone((current) => current === "next" ? null : current),
-                onClick: (event) => navigateFromZone(event, 1),
-                title: "下一张",
-              },
-              React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronRight, "›"))
-            )
+            !isMobileLayout
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "folder-browser-lightbox-zone prev" + (hoverZone === "prev" ? " hovered" : ""),
+                      onMouseEnter: () => setHoverZone("prev"),
+                      onMouseMove: () => setHoverZone("prev"),
+                      onMouseLeave: () => setHoverZone((current) => current === "prev" ? null : current),
+                      onClick: (event) => navigateFromZone(event, -1),
+                      title: "上一张",
+                    },
+                    React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronLeft, "‹"))
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "folder-browser-lightbox-zone next" + (hoverZone === "next" ? " hovered" : ""),
+                      onMouseEnter: () => setHoverZone("next"),
+                      onMouseMove: () => setHoverZone("next"),
+                      onMouseLeave: () => setHoverZone((current) => current === "next" ? null : current),
+                      onClick: (event) => navigateFromZone(event, 1),
+                      title: "下一张",
+                    },
+                    React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronRight, "›"))
+                  )
+                )
+              : null
           ),
           detailsOpen
             ? React.createElement(
