@@ -3691,6 +3691,7 @@
 
     function onPointerDown(event) {
       if (event.target.closest?.(".folder-browser-lightbox-toolbar, .folder-browser-lightbox-details, .folder-browser-lightbox-menu")) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
       if (event.pointerType === "mouse" && event.target.closest?.(".folder-browser-lightbox-zone")) return;
       event.preventDefault();
       lastPointerTypeRef.current = event.pointerType || "mouse";
@@ -3849,6 +3850,13 @@
       onNavigate(delta);
     }
 
+    function closeFromImageContextMenu(event) {
+      if (isMobileLayout) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
+
     const lightbox = React.createElement(
       "div",
       {
@@ -3951,6 +3959,7 @@
               onPointerMove,
               onPointerUp,
               onPointerCancel: onPointerUp,
+              onContextMenu: closeFromImageContextMenu,
               onMouseLeave: () => setHoverZone(null),
               onDoubleClick: isMobileLayout
                 ? (event) => {
