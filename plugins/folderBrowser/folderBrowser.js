@@ -6,7 +6,21 @@
   const { Button, Form } = api.libraries.Bootstrap;
   const { Link, NavLink } = api.libraries.ReactRouterDOM;
   const { FontAwesomeIcon } = api.libraries.ReactFontAwesome;
-  const { faFolder, faFolderOpen, faSyncAlt, faRedoAlt } = api.libraries.FontAwesomeSolid;
+  const {
+    faArrowLeft,
+    faChevronLeft,
+    faChevronRight,
+    faDownload,
+    faEllipsisV,
+    faFolder,
+    faFolderOpen,
+    faInfo,
+    faPause,
+    faPlay,
+    faRedoAlt,
+    faSyncAlt,
+    faTrashAlt,
+  } = api.libraries.FontAwesomeSolid;
 
   const ROUTE = "/folders";
   const PLUGIN_PACKAGE_ID = "folderBrowser";
@@ -55,6 +69,12 @@
   const touchPreviewEnabled =
     window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches ||
     navigator.maxTouchPoints > 0;
+
+  function iconNode(icon, fallback, className = "fa-icon") {
+    return FontAwesomeIcon && icon
+      ? React.createElement(FontAwesomeIcon, { icon, className })
+      : fallback;
+  }
 
   function mobileLayoutNow() {
     return window.matchMedia?.(MOBILE_LAYOUT_QUERY)?.matches ?? window.innerWidth <= 900;
@@ -3202,14 +3222,18 @@
     );
   }
 
-  function ImageLightbox({ items, index, playing, onClose, onMove, onPlayingChange, onDownload, onDelete }) {
+  function ImageLightbox({ items, index, playing, onClose, onNavigate, onPlayingChange, onDownload, onDelete, onMoveFile }) {
     const item = index === null ? null : items[index];
     const [zoom, setZoom] = React.useState(1);
     const [pan, setPan] = React.useState({ x: 0, y: 0 });
     const [detailsOpen, setDetailsOpen] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
+    const [slideshowSettingsOpen, setSlideshowSettingsOpen] = React.useState(false);
+    const [slideshowIntervalMs, setSlideshowIntervalMs] = React.useState(3000);
     const [landscape, setLandscape] = React.useState(false);
     const [displaySrc, setDisplaySrc] = React.useState("");
+    const [chromeVisible, setChromeVisible] = React.useState(true);
+    const [hoverZone, setHoverZone] = React.useState(null);
     const gestureRef = React.useRef(null);
     const imageRef = React.useRef(null);
     const pointersRef = React.useRef(new Map());
@@ -3217,23 +3241,24 @@
     const lastPointerTypeRef = React.useRef("mouse");
     const suppressClickRef = React.useRef(false);
     const suppressClickTimerRef = React.useRef(0);
+    const chromeTimerRef = React.useRef(0);
 
     React.useEffect(() => {
       if (!playing || !item || items.length <= 1) return undefined;
-      const timer = window.setInterval(() => onMove(1), 3000);
+      const timer = window.setInterval(() => onNavigate(1), slideshowIntervalMs);
       return () => window.clearInterval(timer);
-    }, [playing, item, items.length, onMove]);
+    }, [playing, item, items.length, onNavigate, slideshowIntervalMs]);
 
     React.useEffect(() => {
       if (!item) return undefined;
       function onKeyDown(event) {
         if (event.key === "Escape") onClose();
-        if (event.key === "ArrowLeft") onMove(-1);
-        if (event.key === "ArrowRight") onMove(1);
+        if (event.key === "ArrowLeft") onNavigate(-1);
+        if (event.key === "ArrowRight") onNavigate(1);
       }
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
-    }, [item, onClose, onMove]);
+    }, [item, onClose, onNavigate]);
 
     React.useEffect(() => {
       if (!item) return undefined;
@@ -3296,7 +3321,55 @@
       if (index === null) setLandscape(false);
     }, [index]);
 
+    React.useEffect(() => {
+      if (!item) return undefined;
+      setChromeVisible(true);
+      setHoverZone(null);
+      setMenuOpen(false);
+      setSlideshowSettingsOpen(false);
+      scheduleChromeHide();
+      return () => clearChromeTimer();
+    }, [item]);
+
+    React.useEffect(() => () => {
+      clearChromeTimer();
+      window.clearTimeout(suppressClickTimerRef.current);
+    }, []);
+
+    React.useEffect(() => {
+      if (!menuOpen && !slideshowSettingsOpen) return undefined;
+      function closeFloatingMenus(event) {
+        if (event.target.closest?.(".folder-browser-lightbox-menu-wrap")) return;
+        setMenuOpen(false);
+        setSlideshowSettingsOpen(false);
+      }
+      window.addEventListener("pointerdown", closeFloatingMenus, true);
+      return () => window.removeEventListener("pointerdown", closeFloatingMenus, true);
+    }, [menuOpen, slideshowSettingsOpen]);
+
     if (!item) return null;
+
+    function clearChromeTimer() {
+      window.clearTimeout(chromeTimerRef.current);
+      chromeTimerRef.current = 0;
+    }
+
+    function hideChrome() {
+      setChromeVisible(false);
+      setHoverZone(null);
+      setMenuOpen(false);
+      setSlideshowSettingsOpen(false);
+    }
+
+    function scheduleChromeHide() {
+      clearChromeTimer();
+      chromeTimerRef.current = window.setTimeout(hideChrome, 3000);
+    }
+
+    function revealChrome() {
+      setChromeVisible(true);
+      scheduleChromeHide();
+    }
 
     function onWheel(event) {
       event.preventDefault();
@@ -3501,7 +3574,7 @@
             onClose();
           } else if (absX > 64 && absX > absY * 1.2) {
             suppressNextClick();
-            onMove(dx < 0 ? 1 : -1);
+            onNavigate(dx < 0 ? 1 : -1);
           } else if (absX < 12 && absY < 12 && elapsed < 380) {
             maybeToggleLandscapeFromTap(event, gesture);
           }
@@ -3514,10 +3587,69 @@
     const file = primaryImageFile(item.image);
     const fingerprints = file?.fingerprints?.map((fingerprint) => `${fingerprint.type}: ${fingerprint.value}`) || [];
     const customFields = item.image?.custom_fields || {};
+    const lightboxClassName =
+      "folder-browser-lightbox" +
+      (landscape ? " landscape" : "") +
+      (chromeVisible ? " chrome-visible" : " chrome-hidden");
+
+    function lightboxIconButton(className, title, onClick, children, extraProps = {}) {
+      return React.createElement(
+        "button",
+        {
+          type: "button",
+          className: `folder-browser-lightbox-icon-button ${className || ""}`,
+          title,
+          "aria-label": title,
+          onClick: (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            revealChrome();
+            onClick?.(event);
+          },
+          ...extraProps,
+        },
+        children
+      );
+    }
+
+    function lightboxMenuButton(label, onClick, options = {}) {
+      return React.createElement(
+        "button",
+        {
+          type: "button",
+          className: options.danger ? "danger" : "",
+          disabled: options.disabled,
+          title: options.title,
+          onClick: (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (options.disabled) return;
+            revealChrome();
+            if (!options.keepOpen) setMenuOpen(false);
+            onClick?.();
+          },
+        },
+        label
+      );
+    }
+
+    function navigateFromZone(event, delta) {
+      if (consumeSuppressedClick(event)) return;
+      if (lastPointerTypeRef.current !== "mouse") return;
+      revealChrome();
+      onNavigate(delta);
+    }
 
     return React.createElement(
       "div",
-      { className: "folder-browser-lightbox" + (landscape ? " landscape" : ""), role: "dialog", "aria-modal": "true" },
+      {
+        className: lightboxClassName,
+        role: "dialog",
+        "aria-modal": "true",
+        onMouseMove: revealChrome,
+        onPointerDown: revealChrome,
+        onMouseLeave: () => setHoverZone(null),
+      },
       React.createElement("div", { className: "folder-browser-lightbox-backdrop" }),
       React.createElement(
         "div",
@@ -3525,30 +3657,74 @@
         React.createElement(
           "div",
           { className: "folder-browser-lightbox-toolbar" },
-          React.createElement(Button, {
-            className: "folder-browser-lightbox-back",
-            variant: "link",
-            onClick: onClose,
-            title: "返回",
-          }, "←"),
+          React.createElement(
+            "div",
+            { className: "folder-browser-lightbox-toolbar-left" },
+            lightboxIconButton(
+              "folder-browser-lightbox-back",
+              "返回",
+              onClose,
+              iconNode(faArrowLeft, "←")
+            )
+          ),
+          React.createElement("div", { className: "folder-browser-lightbox-count" }, `${index + 1} / ${items.length}`),
           React.createElement(
             "div",
             { className: "folder-browser-lightbox-actions" },
-            React.createElement("span", { className: "folder-browser-lightbox-count" }, `${index + 1} / ${items.length}`),
-            React.createElement(Button, { size: "sm", variant: "secondary", onClick: toggleLandscape, title: landscape ? "竖屏查看" : "横屏查看" }, landscape ? "竖屏" : "横屏"),
-            React.createElement(Button, { size: "sm", variant: detailsOpen ? "primary" : "secondary", onClick: () => setDetailsOpen(!detailsOpen), title: "详情" }, "详情"),
-            React.createElement(Button, { size: "sm", variant: "secondary", onClick: () => setZoom(1), disabled: zoom === 1 }, "重置"),
+            lightboxIconButton(
+              playing ? "active" : "",
+              playing ? "停止幻灯片" : "播放幻灯片",
+              () => onPlayingChange(!playing),
+              iconNode(playing ? faPause : faPlay, playing ? "暂停" : "播放")
+            ),
+            lightboxIconButton(
+              detailsOpen ? "active folder-browser-lightbox-info-button" : "folder-browser-lightbox-info-button",
+              "详情",
+              () => setDetailsOpen((current) => !current),
+              React.createElement("span", { className: "folder-browser-lightbox-info-glyph" }, "i")
+            ),
             React.createElement(
               "div",
               { className: "folder-browser-lightbox-menu-wrap" },
-              React.createElement(Button, { size: "sm", variant: "secondary", onClick: () => setMenuOpen(!menuOpen), title: "更多" }, "..."),
+              lightboxIconButton(
+                menuOpen ? "active" : "",
+                "文件操作",
+                () => setMenuOpen((current) => !current),
+                iconNode(faEllipsisV, "⋮")
+              ),
               menuOpen
                 ? React.createElement(
                     "div",
                     { className: "folder-browser-lightbox-menu" },
-                    React.createElement("button", { onClick: () => { setMenuOpen(false); onDownload(item); } }, "下载原图"),
-                    React.createElement("button", { onClick: () => { setMenuOpen(false); onPlayingChange(!playing); } }, playing ? "停止幻灯片" : "播放幻灯片"),
-                    React.createElement("button", { className: "danger", onClick: () => { setMenuOpen(false); onDelete(item); } }, "删除")
+                    lightboxMenuButton("删除", () => onDelete(item), { danger: true }),
+                    lightboxMenuButton("移动到", () => onMoveFile?.(item)),
+                    lightboxMenuButton("复制到", null, { disabled: true, title: "当前后端还没有提供复制接口" }),
+                    lightboxMenuButton("下载", () => onDownload(item)),
+                    lightboxMenuButton("幻灯片设置", () => setSlideshowSettingsOpen((current) => !current), { keepOpen: true }),
+                    slideshowSettingsOpen
+                      ? React.createElement(
+                          "div",
+                          { className: "folder-browser-lightbox-slideshow-settings" },
+                          React.createElement("span", null, "间隔"),
+                          [2000, 3000, 5000, 8000].map((value) =>
+                            React.createElement(
+                              "button",
+                              {
+                                key: value,
+                                type: "button",
+                                className: slideshowIntervalMs === value ? "active" : "",
+                                onClick: (event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  revealChrome();
+                                  setSlideshowIntervalMs(value);
+                                },
+                              },
+                              `${value / 1000}s`
+                            )
+                          )
+                        )
+                      : null
                   )
                 : null
             )
@@ -3563,20 +3739,12 @@
             onPointerMove,
             onPointerUp,
             onPointerCancel: onPointerUp,
+            onMouseLeave: () => setHoverZone(null),
             onDoubleClick: (event) => {
               event.preventDefault();
               toggleLandscape();
             },
           },
-          React.createElement("button", {
-            className: "folder-browser-lightbox-zone prev",
-            onClick: (event) => {
-              if (consumeSuppressedClick(event)) return;
-              if (lastPointerTypeRef.current !== "mouse") return;
-              onMove(-1);
-            },
-            title: "上一张",
-          }),
           React.createElement("img", {
             ref: imageRef,
             src: displaySrc || item.preview || item.thumb || item.full,
@@ -3590,15 +3758,30 @@
               "--folder-lightbox-pan-y": `${pan.y}px`,
             },
           }),
-          React.createElement("button", {
-            className: "folder-browser-lightbox-zone next",
-            onClick: (event) => {
-              if (consumeSuppressedClick(event)) return;
-              if (lastPointerTypeRef.current !== "mouse") return;
-              onMove(1);
+          React.createElement(
+            "button",
+            {
+              className: "folder-browser-lightbox-zone prev" + (hoverZone === "prev" ? " hovered" : ""),
+              onMouseEnter: () => setHoverZone("prev"),
+              onMouseMove: () => setHoverZone("prev"),
+              onMouseLeave: () => setHoverZone((current) => current === "prev" ? null : current),
+              onClick: (event) => navigateFromZone(event, -1),
+              title: "上一张",
             },
-            title: "下一张",
-          }),
+            React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronLeft, "‹"))
+          ),
+          React.createElement(
+            "button",
+            {
+              className: "folder-browser-lightbox-zone next" + (hoverZone === "next" ? " hovered" : ""),
+              onMouseEnter: () => setHoverZone("next"),
+              onMouseMove: () => setHoverZone("next"),
+              onMouseLeave: () => setHoverZone((current) => current === "next" ? null : current),
+              onClick: (event) => navigateFromZone(event, 1),
+              title: "下一张",
+            },
+            React.createElement("span", { className: "folder-browser-lightbox-zone-arrow" }, iconNode(faChevronRight, "›"))
+          ),
           detailsOpen
             ? React.createElement(
                 "aside",
@@ -4819,6 +5002,17 @@
       }
     }
 
+    function moveImageItem(item) {
+      if (!item?.fileID) {
+        setError("找不到图片文件 ID，无法移动。");
+        return;
+      }
+      openMoveDialog(`移动 ${item.basename || item.title || "图片"}`, [item.fileID], () => {
+        setSelectedImageIDs((current) => current.filter((id) => id !== item.imageID));
+        setLightboxIndex(null);
+      });
+    }
+
     function initialMoveTargetIDForEntry(entry) {
       const sourcePath = normalizePathKey(entry?.path);
       const parentPath = normalizePathKey(entry?.parent_path) || parentPathForPath(sourcePath);
@@ -5271,10 +5465,11 @@
               closeImagePreview();
               setSlideshow(false);
             },
-            onMove: moveLightbox,
+            onNavigate: moveLightbox,
             onPlayingChange: setSlideshow,
             onDownload: downloadImageItem,
             onDelete: deleteImageItem,
+            onMoveFile: moveImageItem,
           }),
           React.createElement(MoveTargetDialog, {
             open: Boolean(moveDialog),

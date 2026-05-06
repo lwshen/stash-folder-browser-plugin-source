@@ -977,22 +977,38 @@ body.folder-browser-lightbox-open {
 .folder-browser-lightbox-toolbar {
   align-items: center;
   color: #fff;
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0.75rem;
   left: 0;
-  padding: 0.65rem 0.85rem;
-  pointer-events: auto;
+  padding: calc(0.75rem + env(safe-area-inset-top)) calc(0.85rem + env(safe-area-inset-right)) 0.75rem calc(0.85rem + env(safe-area-inset-left));
+  pointer-events: none;
   position: absolute;
   right: 0;
   top: 0;
-  z-index: 4;
+  transition: opacity 160ms ease;
+  z-index: 8;
+}
+
+.folder-browser-lightbox.chrome-hidden .folder-browser-lightbox-toolbar,
+.folder-browser-lightbox.chrome-hidden .folder-browser-lightbox-details {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.folder-browser-lightbox-toolbar-left {
+  align-items: center;
+  display: flex;
+  justify-content: flex-start;
+  pointer-events: auto;
 }
 
 .folder-browser-lightbox-actions {
   align-items: center;
   display: flex;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  pointer-events: auto;
 }
 
 .folder-browser-lightbox-menu-wrap {
@@ -1002,30 +1018,62 @@ body.folder-browser-lightbox-open {
 .folder-browser-lightbox-menu {
   background: rgba(24, 26, 32, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  min-width: 9rem;
+  border-radius: 0.4rem;
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.42);
+  min-width: 11rem;
   padding: 0.35rem;
   position: absolute;
   right: 0;
-  top: calc(100% + 0.35rem);
-  z-index: 8;
+  top: calc(100% + 0.5rem);
+  z-index: 12;
 }
 
 .folder-browser-lightbox-menu button {
   background: transparent;
   border: 0;
+  border-radius: 0.25rem;
   color: #fff;
   display: block;
-  padding: 0.45rem 0.55rem;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.65rem;
   text-align: left;
   width: 100%;
 }
 
-.folder-browser-lightbox-menu button:hover {
+.folder-browser-lightbox-menu button:hover:not(:disabled),
+.folder-browser-lightbox-menu button.active {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.folder-browser-lightbox-menu button:disabled {
+  color: rgba(255, 255, 255, 0.36);
+  cursor: not-allowed;
 }
 
 .folder-browser-lightbox-menu button.danger {
   color: #ff9ba7;
+}
+
+.folder-browser-lightbox-slideshow-settings {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: grid;
+  gap: 0.3rem;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+}
+
+.folder-browser-lightbox-slideshow-settings span {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.74rem;
+  grid-column: 1 / -1;
+  padding: 0 0.2rem;
+}
+
+.folder-browser-lightbox-slideshow-settings button {
+  min-height: 2rem;
+  padding: 0.35rem 0.25rem;
+  text-align: center;
 }
 
 .folder-browser-context-menu {
@@ -1063,23 +1111,56 @@ body.folder-browser-lightbox-open {
   color: #ff9ba7;
 }
 
-.folder-browser-lightbox-back {
+.folder-browser-lightbox-icon-button {
+  align-items: center;
+  background: rgba(18, 20, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
   color: #fff;
-  font-size: 1.5rem;
+  display: inline-flex;
+  height: 2.55rem;
+  justify-content: center;
   line-height: 1;
-  padding: 0.1rem 0.35rem;
-  text-decoration: none;
+  min-width: 2.55rem;
+  padding: 0;
+  touch-action: manipulation;
+  width: 2.55rem;
 }
 
-.folder-browser-lightbox-back:hover {
+.folder-browser-lightbox-icon-button:hover,
+.folder-browser-lightbox-icon-button:focus-visible,
+.folder-browser-lightbox-icon-button.active {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
   color: #fff;
-  text-decoration: none;
+  outline: none;
+}
+
+.folder-browser-lightbox-back {
+  font-size: 1.05rem;
+}
+
+.folder-browser-lightbox-info-glyph {
+  align-items: center;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  display: inline-flex;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  height: 1.15rem;
+  justify-content: center;
+  line-height: 1;
+  width: 1.15rem;
 }
 
 .folder-browser-lightbox-count {
   color: rgba(255, 255, 255, 0.72);
-  font-size: 0.85rem;
-  padding: 0 0.35rem;
+  font-size: 0.82rem;
+  justify-self: center;
+  padding: 0.45rem 0.65rem;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .folder-browser-lightbox-stage {
@@ -1117,23 +1198,58 @@ body.folder-browser-lightbox-open {
   border: 0;
   bottom: 0;
   cursor: pointer;
+  display: flex;
+  align-items: center;
   padding: 0;
   position: absolute;
   top: 0;
-  width: 50%;
-  z-index: 1;
+  touch-action: none;
+  z-index: 3;
 }
 
 .folder-browser-lightbox-zone.prev {
+  justify-content: flex-start;
   left: 0;
+  width: 34%;
 }
 
 .folder-browser-lightbox-zone.next {
+  justify-content: flex-end;
   right: 0;
+  width: 66%;
+}
+
+.folder-browser-lightbox-zone-arrow {
+  align-items: center;
+  background: rgba(18, 20, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 1.25rem;
+  height: 3rem;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  width: 3rem;
+}
+
+.folder-browser-lightbox-zone.prev .folder-browser-lightbox-zone-arrow {
+  margin-left: calc(1rem + env(safe-area-inset-left));
+}
+
+.folder-browser-lightbox-zone.next .folder-browser-lightbox-zone-arrow {
+  margin-right: calc(1rem + env(safe-area-inset-right));
+}
+
+.folder-browser-lightbox-zone.hovered .folder-browser-lightbox-zone-arrow {
+  opacity: 1;
 }
 
 .folder-browser-lightbox-details {
   background: rgba(16, 18, 24, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.45rem;
   bottom: 1rem;
   color: #fff;
   max-height: calc(100vh - 5rem);
@@ -1141,9 +1257,10 @@ body.folder-browser-lightbox-open {
   padding: 1rem;
   position: absolute;
   right: 1rem;
-  top: 4rem;
+  top: calc(4.35rem + env(safe-area-inset-top));
+  transition: opacity 160ms ease;
   width: min(24rem, calc(100vw - 2rem));
-  z-index: 5;
+  z-index: 7;
 }
 
 .folder-browser-lightbox.landscape .folder-browser-lightbox-details {
@@ -1197,6 +1314,14 @@ body.folder-browser-lightbox-open {
   inset: 0;
   position: fixed;
   z-index: 1060;
+}
+
+body.folder-browser-lightbox-open .folder-browser-dialog {
+  z-index: 6100;
+}
+
+body.folder-browser-lightbox-open .folder-browser-error {
+  z-index: 6200;
 }
 
 .folder-browser-dialog-backdrop {
