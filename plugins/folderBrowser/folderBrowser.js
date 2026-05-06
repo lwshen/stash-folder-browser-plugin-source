@@ -3242,6 +3242,7 @@
     const [landscape, setLandscape] = React.useState(false);
     const [displaySrc, setDisplaySrc] = React.useState("");
     const [imageReady, setImageReady] = React.useState(false);
+    const [currentOriginalReadySrc, setCurrentOriginalReadySrc] = React.useState("");
     const [chromeVisible, setChromeVisible] = React.useState(true);
     const [hoverZone, setHoverZone] = React.useState(null);
     const gestureRef = React.useRef(null);
@@ -3299,12 +3300,14 @@
       if (!item) {
         setDisplaySrc("");
         setImageReady(false);
+        setCurrentOriginalReadySrc("");
         displaySrcRef.current = "";
         return undefined;
       }
       const previewSrc = lightboxPreviewSrc(item);
       const fullSrc = lightboxFullSrc(item);
       let cancelled = false;
+      setCurrentOriginalReadySrc("");
       function swapImage(src) {
         if (cancelled || !src) return;
         if (src === displaySrcRef.current) {
@@ -3316,8 +3319,12 @@
         setDisplaySrc(src);
       }
       swapImage(previewSrc);
-      if (!fullSrc || fullSrc === previewSrc) return undefined;
+      if (!fullSrc || fullSrc === previewSrc) {
+        setCurrentOriginalReadySrc(fullSrc || previewSrc);
+        return undefined;
+      }
       const image = new Image();
+      setImageLoadPriority(image, "high");
       image.onload = async () => {
         try {
           await image.decode?.();
@@ -3325,40 +3332,61 @@
           // The load event is enough when decode() is not available or rejects.
         }
         swapImage(fullSrc);
+        if (!cancelled) setCurrentOriginalReadySrc(fullSrc);
       };
       image.onerror = () => {
         swapImage(previewSrc);
+        if (!cancelled) setCurrentOriginalReadySrc(fullSrc);
       };
       image.src = fullSrc;
       return () => {
         cancelled = true;
+        cancelImageLoad(image);
       };
     }, [item]);
 
     React.useEffect(() => {
-      if (!item || !items.length || index === null) return;
       const cache = preloadImagesRef.current;
-      const neighborItems = [
-        items[(index - 1 + items.length) % items.length],
-        items[(index + 1) % items.length],
-      ].filter(Boolean);
-      const sources = [...new Set(neighborItems.map(lightboxFullSrc).filter(Boolean))];
-      sources.forEach((src) => {
-        if (cache.has(src)) return;
-        const image = new Image();
-        image.decoding = "async";
-        image.src = src;
-        const decodePromise = image.decode?.();
-        decodePromise?.catch?.(() => {});
-        cache.set(src, image);
-      });
-      const keep = new Set([lightboxFullSrc(item), ...sources].filter(Boolean));
-      for (const src of cache.keys()) {
-        if (keep.has(src)) continue;
-        cache.delete(src);
-        if (cache.size <= 6) break;
+      if (!item || !items.length || index === null) {
+        cancelImagePreloads(cache, new Set());
+        return;
       }
-    }, [item, index, items]);
+      const currentSrc = lightboxFullSrc(item);
+      if (currentOriginalReadySrc !== currentSrc) {
+        cancelImagePreloads(cache, new Set());
+        return;
+      }
+      const nextItem = items[(index + 1) % items.length];
+      const previousItem = items[(index - 1 + items.length) % items.length];
+      const desiredPreloads = [
+        { src: lightboxFullSrc(nextItem), priority: "high" },
+        { src: lightboxFullSrc(previousItem), priority: "low" },
+      ].filter((entry) => entry.src && entry.src !== currentSrc);
+      const seen = new Set();
+      const orderedPreloads = desiredPreloads.filter((entry) => {
+        if (seen.has(entry.src)) return false;
+        seen.add(entry.src);
+        return true;
+      });
+      const keep = new Set(orderedPreloads.map((entry) => entry.src));
+      cancelImagePreloads(cache, keep);
+      orderedPreloads.forEach((entry) => {
+        const cached = cache.get(entry.src);
+        if (cached) {
+          setImageLoadPriority(cached.image, entry.priority);
+          cached.priority = entry.priority;
+          return;
+        }
+        cache.set(entry.src, createImagePreload(entry.src, entry.priority));
+      });
+    }, [currentOriginalReadySrc, item, index, items]);
+
+    React.useEffect(() => {
+      const cache = preloadImagesRef.current;
+      return () => {
+        cancelImagePreloads(cache, new Set());
+      };
+    }, []);
 
     React.useEffect(() => {
       setZoom(1);
@@ -3425,6 +3453,48 @@
 
     function lightboxFullSrc(imageItem) {
       return imageItem?.full || imageItem?.original || lightboxPreviewSrc(imageItem);
+    }
+
+    function setImageLoadPriority(image, priority) {
+      if (!image) return;
+      image.decoding = "async";
+      if ("fetchPriority" in image) image.fetchPriority = priority;
+    }
+
+    function cancelImageLoad(image) {
+      if (!image) return;
+      image.onload = null;
+      image.onerror = null;
+      try {
+        image.removeAttribute("src");
+      } catch (e) {
+        // Some older browsers expose Image without removeAttribute.
+      }
+      image.src = "";
+    }
+
+    function createImagePreload(src, priority) {
+      const image = new Image();
+      const record = { src, priority, image, loaded: false, failed: false };
+      setImageLoadPriority(image, priority);
+      image.onload = () => {
+        record.loaded = true;
+      };
+      image.onerror = () => {
+        record.failed = true;
+      };
+      image.src = src;
+      const decodePromise = image.decode?.();
+      decodePromise?.catch?.(() => {});
+      return record;
+    }
+
+    function cancelImagePreloads(cache, keep) {
+      for (const [src, record] of Array.from(cache.entries())) {
+        if (keep.has(src)) continue;
+        cancelImageLoad(record.image);
+        cache.delete(src);
+      }
     }
 
     function hideChrome() {
