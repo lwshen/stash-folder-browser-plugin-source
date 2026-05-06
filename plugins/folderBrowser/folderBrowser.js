@@ -60,6 +60,19 @@
     { wallHeight: 128, columns: 3 },
     { wallHeight: 190, columns: 2 },
   ];
+  const PDF_PREVIEW_EXTENSIONS = new Set([".pdf"]);
+  const TEXT_PREVIEW_EXTENSIONS = new Set([
+    ".txt",
+    ".log",
+    ".md",
+    ".markdown",
+    ".nfo",
+    ".srt",
+    ".vtt",
+    ".json",
+    ".xml",
+    ".csv",
+  ]);
   const SORT_OPTIONS = [
     { key: "filename", label: "文件名" },
     { key: "file_mod_time", label: "修改时间" },
@@ -952,6 +965,32 @@
     return String(file?.webkitRelativePath || file?.relativePath || file?.name || "")
       .replace(/\\/g, "/")
       .replace(/^\/+/, "");
+  }
+
+  function entryExtension(entry) {
+    const name = String(entry?.basename || entry?.path || "");
+    const dot = name.lastIndexOf(".");
+    const ext = entry?.extension || (dot >= 0 ? name.slice(dot) : "");
+    return String(ext).toLowerCase();
+  }
+
+  function previewKindForEntry(entry) {
+    if (!entry || isDirectoryEntry(entry)) return "";
+    const ext = entryExtension(entry);
+    if (PDF_PREVIEW_EXTENSIONS.has(ext)) return "pdf";
+    if (TEXT_PREVIEW_EXTENSIONS.has(ext)) return "text";
+    return "";
+  }
+
+  function canPreviewEntry(entry) {
+    return Boolean(previewKindForEntry(entry));
+  }
+
+  function folderBrowserFileURL(filePath, options = {}) {
+    const endpoint = `${baseURL.replace(/\/$/, "")}/folder-browser/file`;
+    const query = new URLSearchParams({ path: filePath || "" });
+    if (options.download) query.set("download", "1");
+    return `${endpoint}?${query.toString()}`;
   }
 
   function fileEntrySortValue(entry, sortKey) {
@@ -4422,6 +4461,123 @@
       : lightbox;
   }
 
+  function FilePreview({ preview, onClose, onDownload }) {
+    const entry = preview?.entry;
+    const kind = preview?.kind;
+    const [text, setText] = React.useState("");
+    const [loading, setLoading] = React.useState(false);
+    const [error, setError] = React.useState("");
+
+    React.useEffect(() => {
+      setText("");
+      setError("");
+      if (!entry?.path || kind !== "text") {
+        setLoading(false);
+        return undefined;
+      }
+
+      const controller = new AbortController();
+      let cancelled = false;
+      setLoading(true);
+      fetch(folderBrowserFileURL(entry.path), {
+        credentials: "same-origin",
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+          return response.text();
+        })
+        .then((body) => {
+          if (!cancelled) setText(body);
+        })
+        .catch((e) => {
+          if (!cancelled && e.name !== "AbortError") setError(e.message || String(e));
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }, [entry?.path, kind]);
+
+    React.useEffect(() => {
+      if (!entry) return undefined;
+      function onKeyDown(event) {
+        if (event.key === "Escape") onClose();
+      }
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [entry, onClose]);
+
+    if (!entry) return null;
+
+    const title = entry.basename || pathBasename(entry.path) || "文件";
+    const previewNode = React.createElement(
+      "div",
+      { className: "folder-browser-file-preview" },
+      React.createElement(
+        "div",
+        { className: "folder-browser-file-preview-toolbar" },
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "folder-browser-file-preview-back",
+            onClick: onClose,
+            title: "返回",
+            "aria-label": "返回",
+          },
+          iconNode(faArrowLeft, "←")
+        ),
+        React.createElement(
+          "div",
+          { className: "folder-browser-file-preview-title", title: entry.path },
+          React.createElement("strong", null, title),
+          React.createElement(
+            "span",
+            null,
+            [entry.path, formatBytes(entry.size)].filter(Boolean).join(" · ")
+          )
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "folder-browser-file-preview-action",
+            onClick: () => onDownload(entry),
+            title: "下载",
+            "aria-label": "下载",
+          },
+          iconNode(faDownload, "下载")
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "folder-browser-file-preview-body" },
+        kind === "pdf"
+          ? React.createElement("iframe", {
+              className: "folder-browser-file-preview-frame",
+              src: folderBrowserFileURL(entry.path),
+              title,
+            })
+          : React.createElement(
+              "div",
+              { className: "folder-browser-file-preview-text-wrap" },
+              loading ? React.createElement("div", { className: "folder-browser-file-preview-message" }, "Loading...") : null,
+              error ? React.createElement("div", { className: "folder-browser-file-preview-message error" }, error) : null,
+              !loading && !error ? React.createElement("pre", { className: "folder-browser-file-preview-text" }, text) : null
+            )
+      )
+    );
+
+    return ReactDOM?.createPortal
+      ? ReactDOM.createPortal(previewNode, document.body)
+      : previewNode;
+  }
+
   function FolderBrowserPage() {
     const savedStateRef = React.useRef(readFolderBrowserState());
     const restoreContentRef = React.useRef(true);
@@ -4466,6 +4622,7 @@
     const [lightboxIndex, setLightboxIndex] = React.useState(null);
     const [touchPreviewSceneID, setTouchPreviewSceneID] = React.useState(null);
     const [slideshow, setSlideshow] = React.useState(false);
+    const [filePreview, setFilePreview] = React.useState(null);
     const [selectedSceneIDs, setSelectedSceneIDs] = React.useState([]);
     const [selectedImageIDs, setSelectedImageIDs] = React.useState([]);
     const [moveDialog, setMoveDialog] = React.useState(null);
@@ -5369,6 +5526,11 @@
         selectFolderByPath(entry.path, entry);
         return;
       }
+      const previewKind = previewKindForEntry(entry);
+      if (previewKind) {
+        setFilePreview({ entry, kind: previewKind });
+        return;
+      }
       if (item.scene?.id) {
         persistFolderState({ lastOpenedSceneID: item.scene.id });
         window.location.assign(`${baseURL.replace(/\/$/, "")}/scenes/${item.scene.id}?${SCENE_RETURN_PARAM}=1`);
@@ -5632,7 +5794,7 @@
       event.stopPropagation();
       const entry = item?.entry;
       const isDirectory = isDirectoryEntry(entry);
-      const canOpen = isDirectory || item?.scene || item?.imageItem;
+      const canOpen = isDirectory || canPreviewEntry(entry) || item?.scene || item?.imageItem;
       setContextMenu({
         kind: "entry",
         item,
@@ -5640,6 +5802,7 @@
         y: Math.min(event.clientY, window.innerHeight - 230),
         actions: [
           { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
+          ...(!isDirectory ? [{ label: "下载", onClick: () => downloadFileEntry(entry) }] : []),
           ...(isDirectory ? [{ label: "新建目录", onClick: () => createFolderAt(entry.path) }] : []),
           ...(isDirectory ? [{ label: "上传文件", onClick: () => uploadFilesHere(entry.path) }] : []),
           ...(isDirectory ? [{ label: "上传文件夹", onClick: () => uploadFolderHere(entry.path) }] : []),
@@ -5700,6 +5863,17 @@
       link.href = url;
       link.download = item.basename || item.title || "image";
       link.target = "_blank";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    function downloadFileEntry(itemOrEntry) {
+      const entry = itemOrEntry?.entry || itemOrEntry;
+      if (!entry?.path) return;
+      const link = document.createElement("a");
+      link.href = folderBrowserFileURL(entry.path, { download: true });
+      link.download = entry.basename || pathBasename(entry.path) || "file";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -6496,6 +6670,11 @@
             onDelete: deleteImageItem,
             onMoveFile: moveImageItem,
             onCopyFile: copyImageItem,
+          }),
+          React.createElement(FilePreview, {
+            preview: filePreview,
+            onClose: () => setFilePreview(null),
+            onDownload: downloadFileEntry,
           }),
           React.createElement(MoveTargetDialog, {
             open: Boolean(moveDialog),
