@@ -585,6 +585,132 @@
   word-break: break-word;
 }
 
+.folder-browser-upload-status {
+  align-items: flex-start;
+  background: rgba(24, 26, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.4rem;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.32);
+  color: rgba(255, 255, 255, 0.86);
+  display: flex;
+  gap: 0.6rem;
+  max-width: min(34rem, calc(100vw - 2rem));
+  padding: 0.7rem 0.75rem;
+  position: fixed;
+  right: 1rem;
+  top: calc(7rem + env(safe-area-inset-top));
+  width: min(27rem, calc(100vw - 2rem));
+  z-index: 1300;
+}
+
+.folder-browser-upload-status.failed {
+  border-color: rgba(220, 53, 69, 0.65);
+}
+
+.folder-browser-upload-status-icon {
+  border: 2px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 1rem;
+  margin-top: 0.15rem;
+  position: relative;
+  width: 1rem;
+}
+
+.folder-browser-upload-status-icon::after {
+  background: #8ee0a1;
+  border-radius: 999px;
+  content: "";
+  height: 0.42rem;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 0.42rem;
+}
+
+.folder-browser-upload-status.active .folder-browser-upload-status-icon {
+  animation: folderBrowserSpin 850ms linear infinite;
+  border-color: rgba(13, 110, 253, 0.28);
+  border-top-color: #7eb4ff;
+}
+
+.folder-browser-upload-status.active .folder-browser-upload-status-icon::after {
+  display: none;
+}
+
+.folder-browser-upload-status.failed .folder-browser-upload-status-icon {
+  border-color: #ff7d8e;
+}
+
+.folder-browser-upload-status.failed .folder-browser-upload-status-icon::after {
+  background: #ff7d8e;
+}
+
+.folder-browser-upload-status-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.folder-browser-upload-status-main {
+  align-items: baseline;
+  display: flex;
+  gap: 0.55rem;
+  justify-content: space-between;
+}
+
+.folder-browser-upload-status-main strong,
+.folder-browser-upload-status-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-browser-upload-status-main span,
+.folder-browser-upload-status-detail {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.76rem;
+}
+
+.folder-browser-upload-status-track {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  height: 0.28rem;
+  margin-top: 0.45rem;
+  overflow: hidden;
+}
+
+.folder-browser-upload-status-track span {
+  background: #7eb4ff;
+  display: block;
+  height: 100%;
+  transition: width 120ms ease;
+}
+
+.folder-browser-upload-status-error {
+  color: #ff9ba7;
+  font-size: 0.76rem;
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.folder-browser-upload-status button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: rgba(255, 255, 255, 0.62);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1.2rem;
+  height: 1.5rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 1.5rem;
+}
+
 .folder-browser-size-control {
   align-items: center;
   color: rgba(255, 255, 255, 0.72);
@@ -2488,6 +2614,14 @@ body.folder-browser-lightbox-open .folder-browser-error {
     max-width: none;
     right: calc(0.5rem + env(safe-area-inset-right));
     top: calc(3.15rem + env(safe-area-inset-top));
+    width: auto;
+  }
+
+  .folder-browser-upload-status {
+    left: calc(0.5rem + env(safe-area-inset-left));
+    max-width: none;
+    right: calc(0.5rem + env(safe-area-inset-right));
+    top: calc(6.2rem + env(safe-area-inset-top));
     width: auto;
   }
 

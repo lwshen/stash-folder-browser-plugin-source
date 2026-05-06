@@ -199,6 +199,51 @@
     return json.data;
   }
 
+  async function callUploadGQL(query, variables, fileMappings, onProgress) {
+    const form = new FormData();
+    const map = {};
+    form.append("operations", JSON.stringify({ query, variables }));
+    fileMappings.forEach((mapping, index) => {
+      map[String(index)] = [mapping.path];
+    });
+    form.append("map", JSON.stringify(map));
+    fileMappings.forEach((mapping, index) => {
+      form.append(String(index), mapping.file, mapping.file.name);
+    });
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${baseURL}graphql`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Accept", "application/json");
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable || !onProgress) return;
+        onProgress(event.loaded / Math.max(1, event.total), event.loaded, event.total);
+      };
+      xhr.onload = () => {
+        let json = null;
+        try {
+          json = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch (e) {
+          reject(new Error(xhr.responseText || "上传响应无法解析"));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(json?.errors?.map((e) => e.message).join("; ") || xhr.statusText || `HTTP ${xhr.status}`));
+          return;
+        }
+        if (json?.errors?.length) {
+          reject(new Error(json.errors.map((e) => e.message).join("; ")));
+          return;
+        }
+        resolve(json?.data);
+      };
+      xhr.onerror = () => reject(new Error("上传失败，请检查网络连接。"));
+      xhr.onabort = () => reject(new Error("上传已取消。"));
+      xhr.send(form);
+    });
+  }
+
   const FOLDER_FIELDS = `
     id
     path
@@ -321,6 +366,34 @@
   const FILE_COPY_MUTATION = `
     mutation FolderBrowserFileCopy($path: String!, $destination: String!, $basename: String) {
       fileCopy(path: $path, destination_folder: $destination, destination_basename: $basename)
+    }
+  `;
+
+  const FILE_UPLOAD_MUTATION = `
+    mutation FolderBrowserFileUpload($input: FolderBrowserUploadFileInput!) {
+      fileUpload(input: $input) {
+        path
+        basename
+        type
+        media_type
+        extension
+        size
+        mod_time
+      }
+    }
+  `;
+
+  const FOLDER_UPLOAD_MUTATION = `
+    mutation FolderBrowserFolderUpload($input: FolderBrowserUploadFolderInput!) {
+      folderUpload(input: $input) {
+        path
+        basename
+        type
+        media_type
+        extension
+        size
+        mod_time
+      }
     }
   `;
 
@@ -862,6 +935,25 @@
     return `${Math.max(0, Math.min(100, percent)).toFixed(0)}%`;
   }
 
+  function uploadStatusLabel(status) {
+    switch (status) {
+      case "RUNNING":
+        return "上传中";
+      case "FINISHED":
+        return "上传完成";
+      case "FAILED":
+        return "上传失败";
+      default:
+        return status || "";
+    }
+  }
+
+  function uploadRelativePath(file) {
+    return String(file?.webkitRelativePath || file?.relativePath || file?.name || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "");
+  }
+
   function fileEntrySortValue(entry, sortKey) {
     if (sortKey === "filesize") return Number(entry.size) || 0;
     if (sortKey === "file_mod_time" || sortKey === "created_at") return new Date(entry.mod_time || 0).getTime() || 0;
@@ -1118,6 +1210,41 @@
     );
   }
 
+  function UploadStatus({ status, onClear }) {
+    if (!status) return null;
+    const isActive = status.status === "RUNNING";
+    const isFailed = status.status === "FAILED";
+    const progressLabel = formatJobProgress(status.progress);
+
+    return React.createElement(
+      "div",
+      { className: "folder-browser-upload-status" + (isActive ? " active" : "") + (isFailed ? " failed" : "") },
+      React.createElement("span", { className: "folder-browser-upload-status-icon", "aria-hidden": "true" }),
+      React.createElement(
+        "div",
+        { className: "folder-browser-upload-status-body" },
+        React.createElement(
+          "div",
+          { className: "folder-browser-upload-status-main" },
+          React.createElement("strong", null, status.title || "上传"),
+          React.createElement("span", null, uploadStatusLabel(status.status), progressLabel ? ` · ${progressLabel}` : "")
+        ),
+        status.description ? React.createElement("div", { className: "folder-browser-upload-status-detail" }, status.description) : null,
+        Number.isFinite(status.progress)
+          ? React.createElement(
+              "div",
+              { className: "folder-browser-upload-status-track" },
+              React.createElement("span", { style: { width: `${Math.max(0, Math.min(100, status.progress <= 1 ? status.progress * 100 : status.progress))}%` } })
+            )
+          : null,
+        status.error ? React.createElement("div", { className: "folder-browser-upload-status-error" }, status.error) : null
+      ),
+      !isActive
+        ? React.createElement("button", { type: "button", onClick: onClear, title: "关闭上传状态" }, "×")
+        : null
+    );
+  }
+
   function Breadcrumbs({
     currentFolder,
     includeChildren,
@@ -1307,6 +1434,8 @@
     onClearCopyJobs,
     onOpenFolders,
     onCreateFolder,
+    onUploadFiles,
+    onUploadFolder,
     onRenameFolder,
     onMoveFolder,
     onCopyFolder,
@@ -1440,6 +1569,8 @@
                   "div",
                   { className: "folder-browser-mobile-chip-row" },
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onUploadFiles }, "上传文件"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onUploadFolder }, "上传文件夹"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onRenameFolder }, "重命名"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onMoveFolder }, "移动"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onCopyFolder }, "复制"),
@@ -3328,6 +3459,8 @@
     onDelete,
     onClear,
     onCreateFolder,
+    onUploadFiles,
+    onUploadFolder,
   }) {
     const [menuOpen, setMenuOpen] = React.useState(false);
     const canAct = selectedCount > 0 || canActOnCurrentFolder;
@@ -3393,6 +3526,8 @@
               "div",
               { className: "folder-browser-toolbar-menu" },
               action("新建目录", onCreateFolder, { disabled: !currentFolder }),
+              action("上传文件", onUploadFiles, { disabled: !currentFolder }),
+              action("上传文件夹", onUploadFolder, { disabled: !currentFolder }),
               action("下载", onDownload, { disabled: !selectedImageCount }),
               action("重命名", onRename, { disabled: selectedCount > 1 || !canAct }),
               action("移动", onMove, { disabled: !canAct }),
@@ -4343,6 +4478,7 @@
     const [loadingScenes, setLoadingScenes] = React.useState(false);
     const [loadingImages, setLoadingImages] = React.useState(false);
     const [loadingEntries, setLoadingEntries] = React.useState(false);
+    const [uploadStatus, setUploadStatus] = React.useState(null);
     const [mobileScrollMetrics, setMobileScrollMetrics] = React.useState({ top: 0, height: 0 });
     const [error, setError] = React.useState("");
 
@@ -5259,6 +5395,167 @@
       }
     }
 
+    function openUploadPicker(destinationPath, mode) {
+      if (!destinationPath) return;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.style.display = "none";
+      if (mode === "folder") {
+        input.setAttribute("webkitdirectory", "");
+        input.setAttribute("directory", "");
+      }
+      input.addEventListener("change", () => {
+        const files = Array.from(input.files || []);
+        input.remove();
+        if (!files.length) return;
+        if (mode === "folder") {
+          uploadFolderToPath(destinationPath, files);
+        } else {
+          uploadFilesToPath(destinationPath, files);
+        }
+      }, { once: true });
+      document.body.appendChild(input);
+      input.click();
+    }
+
+    function uploadFilesHere(path = currentFolder?.path) {
+      openUploadPicker(path, "files");
+    }
+
+    function uploadFolderHere(path = currentFolder?.path) {
+      openUploadPicker(path, "folder");
+    }
+
+    async function uploadFilesToPath(destinationPath, selectedFiles) {
+      const files = selectedFiles.filter((file) => file?.name);
+      if (!destinationPath || !files.length) return;
+      const totalBytes = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+      let uploadedBytes = 0;
+      setLoading(true);
+      setError("");
+      setUploadStatus({
+        id: `upload-files-${Date.now()}`,
+        status: "RUNNING",
+        title: `上传 ${files.length} 个文件`,
+        description: destinationPath,
+        progress: 0,
+      });
+      try {
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index];
+          await callUploadGQL(
+            FILE_UPLOAD_MUTATION,
+            {
+              input: {
+                file: null,
+                destination_folder: destinationPath,
+                destination_basename: null,
+              },
+            },
+            [{ path: "variables.input.file", file }],
+            (progress) => {
+              const currentBytes = Number(file.size) ? Number(file.size) * progress : 0;
+              const aggregateProgress = totalBytes
+                ? (uploadedBytes + currentBytes) / totalBytes
+                : (index + progress) / files.length;
+              setUploadStatus((current) => ({
+                ...current,
+                status: "RUNNING",
+                title: `上传文件 ${index + 1}/${files.length}`,
+                description: file.name,
+                progress: aggregateProgress,
+              }));
+            }
+          );
+          uploadedBytes += Number(file.size) || 0;
+        }
+        setUploadStatus((current) => ({
+          ...current,
+          status: "FINISHED",
+          title: `已上传 ${files.length} 个文件`,
+          description: destinationPath,
+          progress: 1,
+        }));
+        refreshFoldersAndContent();
+      } catch (e) {
+        const message = friendlyFileApiError(e);
+        setUploadStatus((current) => ({
+          ...current,
+          status: "FAILED",
+          error: message,
+        }));
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function uploadFolderToPath(destinationPath, selectedFiles) {
+      const files = selectedFiles
+        .map((file) => ({ file, relativePath: uploadRelativePath(file) }))
+        .filter((item) => item.file?.name && item.relativePath);
+      if (!destinationPath || !files.length) return;
+      const firstPath = files[0]?.relativePath || "";
+      const folderName = firstPath.includes("/") ? firstPath.split("/")[0] : pathBasename(firstPath) || "文件夹";
+      setLoading(true);
+      setError("");
+      setUploadStatus({
+        id: `upload-folder-${Date.now()}`,
+        status: "RUNNING",
+        title: `上传文件夹 ${folderName}`,
+        description: `${files.length} 个文件`,
+        progress: 0,
+      });
+      try {
+        await callUploadGQL(
+          FOLDER_UPLOAD_MUTATION,
+          {
+            input: {
+              destination_folder: destinationPath,
+              destination_basename: null,
+              files: files.map((item) => ({
+                file: null,
+                relative_path: item.relativePath,
+              })),
+            },
+          },
+          files.map((item, index) => ({
+            path: `variables.input.files.${index}.file`,
+            file: item.file,
+          })),
+          (progress, loaded, total) => {
+            const detail = total ? `${formatBytes(loaded)} / ${formatBytes(total)}` : `${files.length} 个文件`;
+            setUploadStatus((current) => ({
+              ...current,
+              status: "RUNNING",
+              title: `上传文件夹 ${folderName}`,
+              description: detail,
+              progress,
+            }));
+          }
+        );
+        setUploadStatus((current) => ({
+          ...current,
+          status: "FINISHED",
+          title: `已上传文件夹 ${folderName}`,
+          description: destinationPath,
+          progress: 1,
+        }));
+        refreshFoldersAndContent();
+      } catch (e) {
+        const message = friendlyFileApiError(e);
+        setUploadStatus((current) => ({
+          ...current,
+          status: "FAILED",
+          error: message,
+        }));
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
     async function renameFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
@@ -5344,6 +5641,8 @@
         actions: [
           { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
           ...(isDirectory ? [{ label: "新建目录", onClick: () => createFolderAt(entry.path) }] : []),
+          ...(isDirectory ? [{ label: "上传文件", onClick: () => uploadFilesHere(entry.path) }] : []),
+          ...(isDirectory ? [{ label: "上传文件夹", onClick: () => uploadFolderHere(entry.path) }] : []),
           { label: "移动", onClick: () => moveFileEntry(item) },
           { label: "复制到", onClick: () => copyFileEntry(item) },
           { label: "重命名", onClick: () => renameFileEntry(item) },
@@ -5365,6 +5664,8 @@
         actions: [
           { label: "打开", onClick: () => onSelectFolder(folder) },
           { label: "新建目录", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
+          { label: "上传文件", disabled: !folder?.path, onClick: () => uploadFilesHere(folder.path) },
+          { label: "上传文件夹", disabled: !folder?.path, onClick: () => uploadFolderHere(folder.path) },
           { label: "移动", disabled: !canMutate, onClick: () => moveFileEntry({ entry }) },
           { label: "复制到", disabled: !canMutate, onClick: () => copyFileEntry({ entry }) },
           { label: "重命名", disabled: !canMutate, onClick: () => renameFileEntry({ entry }) },
@@ -5916,6 +6217,8 @@
           onDelete: deleteToolbarTarget,
           onClear: clearSelection,
           onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
+          onUploadFiles: currentFolder ? () => uploadFilesHere(currentFolder.path) : undefined,
+          onUploadFolder: currentFolder ? () => uploadFolderHere(currentFolder.path) : undefined,
         }),
         React.createElement(
           "div",
@@ -6060,6 +6363,7 @@
       },
       loading ? React.createElement("div", { className: "folder-browser-loading" }, "Loading...") : null,
       error ? React.createElement("div", { className: "folder-browser-error" }, error) : null,
+      React.createElement(UploadStatus, { status: uploadStatus, onClear: () => setUploadStatus(null) }),
       !isMobileLayout
         ? React.createElement(
             Button,
@@ -6107,6 +6411,8 @@
                   onControlsToggle: () => setMobileControlsOpen((current) => !current),
                   onOpenFolders: () => setMobileFoldersOpen(true),
                   onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
+                  onUploadFiles: currentFolder ? () => uploadFilesHere(currentFolder.path) : undefined,
+                  onUploadFolder: currentFolder ? () => uploadFolderHere(currentFolder.path) : undefined,
                   onRenameFolder: renameCurrentFolder,
                   onMoveFolder: moveCurrentFolder,
                   onCopyFolder: copyCurrentFolder,

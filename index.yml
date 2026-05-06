@@ -2,7 +2,7 @@
   name: Folder Browser
   metadata:
     description: Adds a folder-first browser with mixed media previews and file management.
-  version: 0.4.18
-  date: 2026-05-06 13:17:29
+  version: 0.4.19
+  date: 2026-05-06 15:03:36
   path: folderBrowser.zip
-  sha256: eb019387f4bf35558a165f2f14b71947f9948b7336d8c4bac7ed004861c8683f
+  sha256: 3fdcf9d0a37feb88b07a0f5b80e36451bf548794c797960116279a7f64033bed
