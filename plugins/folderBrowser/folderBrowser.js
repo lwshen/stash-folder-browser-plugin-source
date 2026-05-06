@@ -4605,6 +4605,16 @@
         : pageSizeForRows(contentWidth, imageSizePreset.wallHeight * 1.2, IMAGE_PAGE_ROWS, WALL_GAP),
       [contentWidth, imageSizePreset.columns, imageSizePreset.wallHeight, isMobileLayout]
     );
+    const scenePageSizeRef = React.useRef(scenePageSize);
+    const imagePageSizeRef = React.useRef(imagePageSize);
+
+    React.useEffect(() => {
+      scenePageSizeRef.current = scenePageSize;
+    }, [scenePageSize]);
+
+    React.useEffect(() => {
+      imagePageSizeRef.current = imagePageSize;
+    }, [imagePageSize]);
 
     React.useEffect(() => {
       if (!isMobileLayout) return undefined;
@@ -4660,8 +4670,8 @@
             saved?.currentFolderID === currentFolder.id;
           const initialScenePage = shouldRestoreContent ? Math.max(1, saved.scenePage || 1) : 1;
           const initialImagePage = shouldRestoreContent ? Math.max(1, saved.imagePage || 1) : 1;
-          const initialScenePageSize = scenePageSize * initialScenePage;
-          const initialImagePageSize = imagePageSize * initialImagePage;
+          const initialScenePageSize = scenePageSizeRef.current * initialScenePage;
+          const initialImagePageSize = imagePageSizeRef.current * initialImagePage;
           const [listingData, sceneData, imageData] = await Promise.all([
             callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentFolder.path }),
             canQueryScannedMedia
@@ -4706,7 +4716,7 @@
       return () => {
         cancelled = true;
       };
-    }, [currentFolder, includeChildren, sortState, scenePageSize, imagePageSize, reloadKey]);
+    }, [currentFolder, includeChildren, sortState, reloadKey]);
 
     async function loadChildren(folder) {
       setFolderTree((current) =>
@@ -5045,10 +5055,11 @@
     );
 
     React.useEffect(() => {
+      if (lightboxIndex !== null && loadingImages && lightboxImages.length === 0) return;
       if (lightboxIndex !== null && lightboxIndex >= lightboxImages.length) {
         setLightboxIndex(lightboxImages.length ? lightboxImages.length - 1 : null);
       }
-    }, [lightboxIndex, lightboxImages.length]);
+    }, [lightboxIndex, lightboxImages.length, loadingImages]);
 
     React.useEffect(() => {
       if (!previewAllVisible || activeView !== "video" || !wallVideos.length) {
