@@ -754,7 +754,7 @@
   }
 
   function isHEIFFile(file) {
-    return ["heic", "heif"].includes(fileFormat(file));
+    return ["heic", "heif", "hif"].includes(fileFormat(file));
   }
 
   function imageDisplayPath(image, file) {
