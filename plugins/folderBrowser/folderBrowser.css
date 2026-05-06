@@ -798,6 +798,19 @@
   white-space: nowrap;
 }
 
+.folder-browser-mobile-more-button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 2.35rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.folder-browser-mobile-preview-toggle {
+  flex: 0 0 auto;
+}
+
 .folder-browser-mobile-controls {
   background: rgba(24, 26, 32, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -1671,6 +1684,14 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
   user-select: none;
   width: auto;
   will-change: opacity;
+}
+
+.folder-browser-lightbox-original-preload {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
 }
 
 .folder-browser-lightbox-image.preview {
@@ -2856,6 +2877,17 @@ body.folder-browser-lightbox-open .folder-browser-error {
   .folder-browser-mobile-quick-actions,
   .folder-browser-mobile-chip-row {
     gap: 0.3rem;
+    flex-wrap: nowrap;
+  }
+
+  .folder-browser-mobile-viewbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .folder-browser-mobile-viewbar::-webkit-scrollbar {
+    display: none;
   }
 
   .folder-browser-mobile-size-actions .btn,
@@ -2871,8 +2903,12 @@ body.folder-browser-lightbox-open .folder-browser-error {
   }
 
   .folder-browser-mobile-count {
-    margin-left: auto;
     font-size: 0.76rem;
+  }
+
+  .folder-browser-mobile-topbar .folder-browser-preview-toggle {
+    height: 2.35rem;
+    width: 2.35rem;
   }
 
   .folder-browser-mobile-controls {

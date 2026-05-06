@@ -767,7 +767,7 @@
 
   function imagePreviewPath(image) {
     const paths = image?.paths || {};
-    return paths.preview || paths.thumbnail || paths.image;
+    return paths.thumbnail || paths.preview || paths.image;
   }
 
   function imageItems(images) {
@@ -1537,7 +1537,31 @@
           React.createElement("small", null, subtitle)
         ),
         React.createElement(CopyJobIndicator, { jobs: copyJobs, onClear: onClearCopyJobs }),
-        React.createElement(Button, { size: "sm", variant: controlsOpen ? "primary" : "secondary", onClick: onControlsToggle }, "排序")
+        activeView === "video"
+          ? React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "folder-browser-preview-toggle folder-browser-mobile-preview-toggle" + (previewAllVisible ? " active" : ""),
+                onClick: () => onPreviewAllVisibleChange(!previewAllVisible),
+                title: previewAllVisible ? "关闭自动预览" : "打开自动预览",
+                "aria-label": previewAllVisible ? "关闭自动预览" : "打开自动预览",
+              },
+              iconNode(previewAllVisible ? faPause : faPlay, previewAllVisible ? "Ⅱ" : "▶")
+            )
+          : null,
+        React.createElement(
+          Button,
+          {
+            size: "sm",
+            variant: controlsOpen ? "primary" : "secondary",
+            className: "folder-browser-mobile-more-button",
+            onClick: onControlsToggle,
+            title: "更多选项",
+            "aria-label": "更多选项",
+          },
+          iconNode(faEllipsisV, "⋮")
+        )
       ),
       React.createElement(
         "div",
@@ -1588,14 +1612,7 @@
             Button,
             { size: "sm", variant: includeChildren ? "primary" : "secondary", onClick: () => onIncludeChildrenChange(!includeChildren) },
             "子文件夹"
-          ),
-          activeView === "video"
-            ? React.createElement(
-                Button,
-                { size: "sm", variant: previewAllVisible ? "primary" : "secondary", onClick: () => onPreviewAllVisibleChange(!previewAllVisible) },
-                "自动预览"
-              )
-            : null
+          )
         ),
         React.createElement("span", { className: "folder-browser-mobile-divider" }),
         React.createElement(
@@ -3952,6 +3969,19 @@
       return imageItem?.full || imageItem?.original || lightboxPreviewSrc(imageItem);
     }
 
+    function promoteOriginalImage(src, image) {
+      if (!src || src !== lightboxFullSrc(item)) return;
+      if (image?.naturalWidth && image?.naturalHeight) {
+        setLoadedOriginalInfo({ src, width: image.naturalWidth, height: image.naturalHeight });
+      }
+      if (src !== displaySrcRef.current) {
+        displaySrcRef.current = src;
+        setImageReady(false);
+        setDisplaySrc(src);
+      }
+      setCurrentOriginalReadySrc(src);
+    }
+
     function lightboxOriginalSize(imageItem) {
       const fullSrc = lightboxFullSrc(imageItem);
       if (loadedOriginalInfo?.src === fullSrc && loadedOriginalInfo.width && loadedOriginalInfo.height) {
@@ -4419,6 +4449,17 @@
                   }
                 : undefined,
             },
+            React.createElement("img", {
+              key: `original-preload-${item.id}-${lightboxFullSrc(item)}`,
+              className: "folder-browser-lightbox-original-preload",
+              src: lightboxFullSrc(item),
+              alt: "",
+              "aria-hidden": "true",
+              decoding: "async",
+              fetchPriority: "high",
+              onLoad: (event) => promoteOriginalImage(lightboxFullSrc(item), event.currentTarget),
+              onError: () => setCurrentOriginalReadySrc(lightboxFullSrc(item)),
+            }),
             React.createElement("img", {
               ref: imageRef,
               className: "folder-browser-lightbox-image current"
