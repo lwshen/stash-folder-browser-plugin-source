@@ -1217,7 +1217,7 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
   touch-action: none;
   transform: translate(var(--folder-lightbox-pan-x, 0), var(--folder-lightbox-pan-y, 0)) scale(var(--folder-lightbox-zoom, 1));
   transform-origin: center center;
-  transition: opacity 180ms ease, filter 180ms ease;
+  transition: opacity 120ms ease-out;
   user-select: none;
   will-change: opacity;
 }
@@ -1229,15 +1229,6 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
 
 .folder-browser-lightbox-image.current.ready {
   opacity: 1;
-}
-
-.folder-browser-lightbox-image.previous {
-  left: 50%;
-  opacity: 1;
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 1;
 }
 
 .folder-browser-lightbox-stage img[style*="--folder-lightbox-zoom: 1"] {

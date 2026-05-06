@@ -3241,14 +3241,12 @@
     const [slideshowIntervalMs, setSlideshowIntervalMs] = React.useState(3000);
     const [landscape, setLandscape] = React.useState(false);
     const [displaySrc, setDisplaySrc] = React.useState("");
-    const [previousDisplaySrc, setPreviousDisplaySrc] = React.useState("");
     const [imageReady, setImageReady] = React.useState(false);
     const [chromeVisible, setChromeVisible] = React.useState(true);
     const [hoverZone, setHoverZone] = React.useState(null);
     const gestureRef = React.useRef(null);
     const imageRef = React.useRef(null);
     const displaySrcRef = React.useRef("");
-    const previousClearTimerRef = React.useRef(0);
     const pointersRef = React.useRef(new Map());
     const lastTapRef = React.useRef(null);
     const lastPointerTypeRef = React.useRef("mouse");
@@ -3299,7 +3297,6 @@
     React.useEffect(() => {
       if (!item) {
         setDisplaySrc("");
-        setPreviousDisplaySrc("");
         setImageReady(false);
         displaySrcRef.current = "";
         return undefined;
@@ -3313,8 +3310,6 @@
           setImageReady(true);
           return;
         }
-        window.clearTimeout(previousClearTimerRef.current);
-        if (fade && displaySrcRef.current) setPreviousDisplaySrc(displaySrcRef.current);
         displaySrcRef.current = src;
         setImageReady(false);
         setDisplaySrc(src);
@@ -3378,7 +3373,6 @@
     React.useEffect(() => () => {
       clearChromeTimer();
       window.clearTimeout(suppressClickTimerRef.current);
-      window.clearTimeout(previousClearTimerRef.current);
     }, []);
 
     React.useEffect(() => {
@@ -3802,26 +3796,12 @@
                   }
                 : undefined,
             },
-            previousDisplaySrc
-              ? React.createElement("img", {
-                  className: "folder-browser-lightbox-image previous",
-                  src: previousDisplaySrc,
-                  alt: "",
-                  "aria-hidden": "true",
-                })
-              : null,
             React.createElement("img", {
               ref: imageRef,
               className: "folder-browser-lightbox-image current" + (imageReady ? " ready" : ""),
               src: displaySrc || item.preview || item.thumb || item.full,
               alt: item.title,
-              onLoad: () => {
-                setImageReady(true);
-                if (previousDisplaySrc) {
-                  window.clearTimeout(previousClearTimerRef.current);
-                  previousClearTimerRef.current = window.setTimeout(() => setPreviousDisplaySrc(""), 240);
-                }
-              },
+              onLoad: () => setImageReady(true),
               onError: () => setImageReady(true),
               onClick: (event) => {
                 consumeSuppressedClick(event);
