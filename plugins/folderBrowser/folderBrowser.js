@@ -324,6 +324,22 @@
     }
   `;
 
+  const FIND_JOB_QUERY = `
+    query FolderBrowserFindJob($input: FindJobInput!) {
+      findJob(input: $input) {
+        id
+        status
+        subTasks
+        description
+        progress
+        startTime
+        endTime
+        addTime
+        error
+      }
+    }
+  `;
+
   const FILE_DELETE_MUTATION = `
     mutation FolderBrowserFileDelete($path: String!) {
       fileDelete(path: $path)
@@ -815,6 +831,37 @@
     return entry?.type === "DIRECTORY" || entry?.media_type === "DIRECTORY";
   }
 
+  const COPY_JOB_TERMINAL_STATUSES = new Set(["FINISHED", "FAILED", "CANCELLED"]);
+
+  function isTerminalCopyJob(job) {
+    return COPY_JOB_TERMINAL_STATUSES.has(job?.status);
+  }
+
+  function copyJobStatusLabel(status) {
+    switch (status) {
+      case "READY":
+        return "等待";
+      case "RUNNING":
+        return "复制中";
+      case "FINISHED":
+        return "完成";
+      case "FAILED":
+        return "失败";
+      case "CANCELLED":
+        return "已取消";
+      case "STOPPING":
+        return "停止中";
+      default:
+        return status || "未知";
+    }
+  }
+
+  function formatJobProgress(progress) {
+    if (!Number.isFinite(progress)) return "";
+    const percent = progress <= 1 ? progress * 100 : progress;
+    return `${Math.max(0, Math.min(100, percent)).toFixed(0)}%`;
+  }
+
   function fileEntrySortValue(entry, sortKey) {
     if (sortKey === "filesize") return Number(entry.size) || 0;
     if (sortKey === "file_mod_time" || sortKey === "created_at") return new Date(entry.mod_time || 0).getTime() || 0;
@@ -825,8 +872,8 @@
   function sortFileEntries(entries, sortState) {
     const direction = sortState.direction === "ASC" ? 1 : -1;
     return [...(entries ?? [])].sort((a, b) => {
-      const aDir = a.type === "DIRECTORY" || a.media_type === "DIRECTORY";
-      const bDir = b.type === "DIRECTORY" || b.media_type === "DIRECTORY";
+      const aDir = isDirectoryEntry(a);
+      const bDir = isDirectoryEntry(b);
       if (aDir !== bDir) return aDir ? -1 : 1;
       const aValue = fileEntrySortValue(a, sortState.key);
       const bValue = fileEntrySortValue(b, sortState.key);
@@ -992,6 +1039,85 @@
     );
   }
 
+  function CopyJobIndicator({ jobs, onClear }) {
+    const [open, setOpen] = React.useState(false);
+    const rootRef = React.useRef(null);
+    const list = React.useMemo(
+      () => Object.values(jobs || {}).sort((a, b) => (b.updatedAt || b.startedAt || 0) - (a.updatedAt || a.startedAt || 0)),
+      [jobs]
+    );
+    const activeCount = list.filter((job) => !isTerminalCopyJob(job)).length;
+    const failedCount = list.filter((job) => job.status === "FAILED").length;
+    const hasJobs = list.length > 0;
+
+    React.useEffect(() => {
+      if (!open) return undefined;
+      function closeOnOutside(event) {
+        if (rootRef.current?.contains(event.target)) return;
+        setOpen(false);
+      }
+      window.addEventListener("pointerdown", closeOnOutside, true);
+      return () => window.removeEventListener("pointerdown", closeOnOutside, true);
+    }, [open]);
+
+    if (!hasJobs) return null;
+
+    const buttonLabel = activeCount
+      ? `复制 ${activeCount}`
+      : failedCount
+        ? `失败 ${failedCount}`
+        : "复制完成";
+
+    return React.createElement(
+      "div",
+      { className: "folder-browser-copy-jobs", ref: rootRef },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "folder-browser-copy-jobs-button" + (activeCount ? " active" : "") + (failedCount ? " failed" : ""),
+          onClick: () => setOpen((current) => !current),
+          title: "复制任务状态",
+        },
+        React.createElement("span", { className: "folder-browser-copy-jobs-icon", "aria-hidden": "true" }),
+        React.createElement("span", null, buttonLabel)
+      ),
+      open
+        ? React.createElement(
+            "div",
+            { className: "folder-browser-copy-jobs-panel" },
+            React.createElement(
+              "div",
+              { className: "folder-browser-copy-jobs-head" },
+              React.createElement("strong", null, "复制任务"),
+              React.createElement("button", { type: "button", onClick: onClear }, "清除")
+            ),
+            list.map((job) =>
+              React.createElement(
+                "div",
+                { key: job.id, className: "folder-browser-copy-job-row" },
+                React.createElement(
+                  "div",
+                  { className: "folder-browser-copy-job-main" },
+                  React.createElement("span", { className: "folder-browser-copy-job-title" }, job.description || job.title || `复制任务 ${job.id}`),
+                  React.createElement(
+                    "span",
+                    { className: "folder-browser-copy-job-status" },
+                    copyJobStatusLabel(job.status),
+                    formatJobProgress(job.progress) ? ` · ${formatJobProgress(job.progress)}` : ""
+                  )
+                ),
+                job.subTasks?.length
+                  ? React.createElement("div", { className: "folder-browser-copy-job-subtask" }, job.subTasks[job.subTasks.length - 1])
+                  : null,
+                job.error ? React.createElement("div", { className: "folder-browser-copy-job-error" }, job.error) : null
+              )
+            )
+          )
+        : null
+    );
+  }
+
   function Breadcrumbs({
     currentFolder,
     includeChildren,
@@ -1003,6 +1129,8 @@
     mediaCount,
     allSelected,
     someSelected,
+    copyJobs,
+    onClearCopyJobs,
     onSelectAllChange,
     onIncludeChildrenChange,
     onActiveViewChange,
@@ -1048,6 +1176,7 @@
       React.createElement(
         "div",
         { className: "folder-browser-view-buttons" },
+        React.createElement(CopyJobIndicator, { jobs: copyJobs, onClear: onClearCopyJobs }),
         onSelectAllChange
           ? React.createElement(
               "label",
@@ -1172,7 +1301,9 @@
     includeChildren,
     previewAllVisible,
     sizeIndex,
+    copyJobs,
     canActOnCurrentFolder,
+    onClearCopyJobs,
     onOpenFolders,
     onCreateFolder,
     onRenameFolder,
@@ -1203,6 +1334,7 @@
           React.createElement("span", null, title),
           React.createElement("small", null, subtitle)
         ),
+        React.createElement(CopyJobIndicator, { jobs: copyJobs, onClear: onClearCopyJobs }),
         React.createElement(Button, { size: "sm", variant: controlsOpen ? "primary" : "secondary", onClick: onControlsToggle }, "排序")
       ),
       React.createElement(
@@ -3007,7 +3139,7 @@
     const longPressRef = React.useRef(null);
     const longPressTriggeredRef = React.useRef(false);
     const entry = item.entry;
-    const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+    const isDirectory = isDirectoryEntry(entry);
     const title = entry.basename || pathBasename(entry.path);
     const extension = String(entry.extension || "").replace(/^\./, "");
     const meta = [
@@ -3171,20 +3303,65 @@
     onClear,
     onCreateFolder,
   }) {
+    const [menuOpen, setMenuOpen] = React.useState(false);
+    const rootRef = React.useRef(null);
     const canAct = selectedCount > 0 || canActOnCurrentFolder;
+
+    React.useEffect(() => {
+      if (!menuOpen) return undefined;
+      function closeOnOutside(event) {
+        if (rootRef.current?.contains(event.target)) return;
+        setMenuOpen(false);
+      }
+      window.addEventListener("pointerdown", closeOnOutside, true);
+      return () => window.removeEventListener("pointerdown", closeOnOutside, true);
+    }, [menuOpen]);
+
+    function action(label, onClick, options = {}) {
+      return React.createElement(
+        "button",
+        {
+          type: "button",
+          className: options.danger ? "danger" : undefined,
+          disabled: options.disabled,
+          onClick: () => {
+            setMenuOpen(false);
+            onClick?.();
+          },
+        },
+        label
+      );
+    }
+
     return React.createElement(
       "div",
-      { className: "folder-browser-file-toolbar" },
-      React.createElement("div", { className: "folder-browser-toolbar-title" }, currentFolder ? currentFolder.basename || currentFolder.path : "未选择目录"),
+      { className: "folder-browser-file-toolbar", ref: rootRef },
       React.createElement(
         "div",
-        { className: "folder-browser-toolbar-buttons" },
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount > 1 || !canAct, onClick: onRename }, "重命名"),
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canAct, onClick: onMove }, "移动"),
-        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canAct, onClick: onCopy }, "复制"),
-        React.createElement(Button, { size: "sm", variant: "danger", disabled: !canAct, onClick: onDelete }, "删除")
+        { className: "folder-browser-toolbar-head" },
+        React.createElement("div", { className: "folder-browser-toolbar-title", title: currentFolder?.path }, currentFolder ? currentFolder.basename || currentFolder.path : "未选择目录"),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "folder-browser-toolbar-menu-button",
+            onClick: () => setMenuOpen((current) => !current),
+            title: "文件操作",
+          },
+          iconNode(faEllipsisV, "⋮")
+        ),
+        menuOpen
+          ? React.createElement(
+              "div",
+              { className: "folder-browser-toolbar-menu" },
+              action("新建目录", onCreateFolder, { disabled: !currentFolder }),
+              action("下载", onDownload, { disabled: !selectedImageCount }),
+              action("重命名", onRename, { disabled: selectedCount > 1 || !canAct }),
+              action("移动", onMove, { disabled: !canAct }),
+              action("复制", onCopy, { disabled: !canAct }),
+              action("删除", onDelete, { disabled: !canAct, danger: true })
+            )
+          : null
       ),
       selectedCount
         ? React.createElement(
@@ -4120,6 +4297,7 @@
     const [selectedImageIDs, setSelectedImageIDs] = React.useState([]);
     const [moveDialog, setMoveDialog] = React.useState(null);
     const [contextMenu, setContextMenu] = React.useState(null);
+    const [copyJobs, setCopyJobs] = React.useState({});
     const [moveTargetFolderID, setMoveTargetFolderID] = React.useState(null);
     const [reloadKey, setReloadKey] = React.useState(0);
     const [folderReloadKey, setFolderReloadKey] = React.useState(0);
@@ -4753,6 +4931,7 @@
     );
 
     const toggleSceneSelection = React.useCallback((sceneID, selected) => {
+      setContextMenu(null);
       setSelectedSceneIDs((current) => {
         if (selected) return current.includes(sceneID) ? current : [...current, sceneID];
         return current.filter((id) => id !== sceneID);
@@ -4760,6 +4939,7 @@
     }, []);
 
     const toggleImageSelection = React.useCallback((imageID, selected) => {
+      setContextMenu(null);
       setSelectedImageIDs((current) => {
         if (selected) return current.includes(imageID) ? current : [...current, imageID];
         return current.filter((id) => id !== imageID);
@@ -4767,6 +4947,7 @@
     }, []);
 
     const toggleAllScenes = React.useCallback((selected) => {
+      setContextMenu(null);
       const ids = wallVideos.map((item) => item.id);
       setSelectedSceneIDs((current) => {
         const rest = current.filter((id) => !ids.includes(id));
@@ -4775,6 +4956,7 @@
     }, [wallVideos]);
 
     const toggleAllImages = React.useCallback((selected) => {
+      setContextMenu(null);
       const ids = wallImages.map((item) => item.imageID);
       setSelectedImageIDs((current) => {
         const rest = current.filter((id) => !ids.includes(id));
@@ -4906,6 +5088,86 @@
       setReloadKey((current) => current + 1);
     }, []);
 
+    const activeCopyJobIDs = React.useMemo(
+      () => Object.values(copyJobs)
+        .filter((job) => job?.id && !isTerminalCopyJob(job))
+        .map((job) => job.id)
+        .join(","),
+      [copyJobs]
+    );
+
+    function trackCopyJobs(jobs) {
+      const startedJobs = (jobs || []).filter((job) => job?.id);
+      if (!startedJobs.length) return;
+      const now = Date.now();
+      setCopyJobs((current) => {
+        const next = { ...current };
+        startedJobs.forEach((job) => {
+          next[job.id] = {
+            ...(next[job.id] || {}),
+            id: job.id,
+            title: job.title,
+            description: job.description || job.title,
+            status: next[job.id]?.status || "READY",
+            progress: next[job.id]?.progress ?? null,
+            startedAt: next[job.id]?.startedAt || now,
+            updatedAt: now,
+          };
+        });
+        return next;
+      });
+    }
+
+    React.useEffect(() => {
+      if (!activeCopyJobIDs) return undefined;
+      let cancelled = false;
+      const ids = activeCopyJobIDs.split(",").filter(Boolean);
+
+      async function pollCopyJobs() {
+        const results = await Promise.all(ids.map((id) =>
+          callGQL(FIND_JOB_QUERY, { input: { id } })
+            .then((data) => data?.findJob || { id, status: "FINISHED" })
+            .catch((error) => ({ id, status: "FAILED", error: error.message || String(error) }))
+        ));
+        if (cancelled) return;
+        const shouldRefresh = results.some((job) => job.status === "FINISHED");
+        const now = Date.now();
+        setCopyJobs((current) => {
+          const next = { ...current };
+          results.forEach((job) => {
+            const previous = next[job.id] || { id: job.id };
+            const nextJob = {
+              ...previous,
+              ...job,
+              description: job.description || previous.description,
+              title: previous.title,
+              updatedAt: now,
+            };
+            next[job.id] = nextJob;
+          });
+          return next;
+        });
+        if (shouldRefresh) refreshFoldersAndContent();
+      }
+
+      pollCopyJobs();
+      const timer = window.setInterval(pollCopyJobs, 1200);
+      return () => {
+        cancelled = true;
+        window.clearInterval(timer);
+      };
+    }, [activeCopyJobIDs, refreshFoldersAndContent]);
+
+    function clearCopyJobs() {
+      setCopyJobs((current) => {
+        const active = {};
+        Object.values(current).forEach((job) => {
+          if (!isTerminalCopyJob(job)) active[job.id] = job;
+        });
+        return active;
+      });
+    }
+
     const handleScrollAreaScroll = React.useCallback(() => {
       scheduleMobileScrollMetrics();
     }, [scheduleMobileScrollMetrics]);
@@ -4913,7 +5175,7 @@
     function openFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
-      if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+      if (isDirectoryEntry(entry)) {
         selectFolderByPath(entry.path, entry);
         return;
       }
@@ -4951,7 +5213,7 @@
       setLoading(true);
       setError("");
       try {
-        if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+        if (isDirectoryEntry(entry)) {
           await callGQL(FOLDER_RENAME_MUTATION, { path: entry.path, basename });
           if (currentFolder?.path === entry.path) selectFolderByPath(joinFolderPath(entry.parent_path || "", basename));
           refreshFoldersAndContent();
@@ -4987,7 +5249,7 @@
       setLoading(true);
       setError("");
       try {
-        if (entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY") {
+        if (isDirectoryEntry(entry)) {
           await callGQL(FOLDER_DELETE_MUTATION, { path: entry.path });
           if (currentFolder?.path === entry.path) {
             const parentPath = entry.parent_path || folderParentPath(currentFolder);
@@ -5439,17 +5701,23 @@
       setLoading(true);
       setError("");
       try {
-        await Promise.all(entries.map((entry) =>
-          callGQL(isDirectoryEntry(entry) ? FOLDER_COPY_MUTATION : FILE_COPY_MUTATION, {
+        const startedJobs = await Promise.all(entries.map(async (entry) => {
+          const isDirectory = isDirectoryEntry(entry);
+          const data = await callGQL(isDirectory ? FOLDER_COPY_MUTATION : FILE_COPY_MUTATION, {
             path: entry.path,
             destination: destinationFolder.path,
             basename: null,
-          })
-        ));
+          });
+          const jobID = isDirectory ? data?.folderCopy : data?.fileCopy;
+          return {
+            id: jobID ? String(jobID) : "",
+            title: `复制 ${entry.basename || pathBasename(entry.path) || "文件"}`,
+          };
+        }));
+        trackCopyJobs(startedJobs);
         moveDialog.onDone?.();
         setMoveDialog(null);
         setMoveTargetFolderID(null);
-        refreshFoldersAndContent();
       } catch (e) {
         setError(friendlyFileApiError(e));
       } finally {
@@ -5779,7 +6047,9 @@
                   includeChildren,
                   previewAllVisible,
                   sizeIndex: activeSizeIndex,
+                  copyJobs,
                   canActOnCurrentFolder: canMutateFolder(currentFolder),
+                  onClearCopyJobs: clearCopyJobs,
                   controlsOpen: mobileControlsOpen,
                   onControlsToggle: () => setMobileControlsOpen((current) => !current),
                   onOpenFolders: () => setMobileFoldersOpen(true),
@@ -5805,6 +6075,8 @@
                   mediaCount: activeMediaCount,
                   allSelected: activeView === "video" ? allWallVideosSelected : activeView === "image" ? allWallImagesSelected : false,
                   someSelected: activeView === "video" ? someWallVideosSelected : activeView === "image" ? someWallImagesSelected : false,
+                  copyJobs,
+                  onClearCopyJobs: clearCopyJobs,
                   onSelectAllChange: activeView === "video" ? toggleAllScenes : activeView === "image" ? toggleAllImages : undefined,
                   onIncludeChildrenChange: setIncludeChildren,
                   onActiveViewChange: setActiveView,
