@@ -3717,6 +3717,8 @@
     const gestureRef = React.useRef(null);
     const stageRef = React.useRef(null);
     const imageRef = React.useRef(null);
+    const zoomRef = React.useRef(zoom);
+    const panRef = React.useRef(pan);
     const displaySrcRef = React.useRef("");
     const preloadImagesRef = React.useRef(new Map());
     const pointersRef = React.useRef(new Map());
@@ -3726,6 +3728,8 @@
     const suppressClickTimerRef = React.useRef(0);
     const chromeTimerRef = React.useRef(0);
     const autoHideChrome = isMobileLayout;
+    zoomRef.current = zoom;
+    panRef.current = pan;
 
     React.useEffect(() => {
       if (!playing || !item || items.length <= 1) return undefined;
@@ -4125,7 +4129,9 @@
     }
 
     function toggleImageZoomFromTap(event) {
-      if (zoom > 1.05) {
+      const currentZoom = zoomRef.current;
+      const currentPan = panRef.current;
+      if (currentZoom > 1.05) {
         setZoom(1);
         setPan({ x: 0, y: 0 });
         return;
@@ -4138,12 +4144,24 @@
       }
       const point = relativeStagePoint(stage, { x: event.clientX, y: event.clientY });
       const nextZoom = 2.5;
-      const ratio = nextZoom / Math.max(1, zoom);
+      const ratio = nextZoom / Math.max(1, currentZoom);
       setPan({
-        x: pan.x + (point.x - pan.x) * (1 - ratio),
-        y: pan.y + (point.y - pan.y) * (1 - ratio),
+        x: currentPan.x + (point.x - currentPan.x) * (1 - ratio),
+        y: currentPan.y + (point.y - currentPan.y) * (1 - ratio),
       });
       setZoom(nextZoom);
+    }
+
+    function isImageTapTarget(event) {
+      if (event.target.closest?.(".folder-browser-lightbox-image")) return true;
+      const rect = imageRef.current?.getBoundingClientRect?.();
+      return Boolean(
+        rect &&
+          event.clientX >= rect.left &&
+          event.clientX <= rect.right &&
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom
+      );
     }
 
     function maybeHandleDoubleTap(event, gesture) {
@@ -4157,7 +4175,7 @@
       ) {
         lastTapRef.current = null;
         suppressNextClick();
-        if (event.target.closest?.(".folder-browser-lightbox-image")) {
+        if (isImageTapTarget(event)) {
           toggleImageZoomFromTap(event);
         } else {
           toggleLandscape();

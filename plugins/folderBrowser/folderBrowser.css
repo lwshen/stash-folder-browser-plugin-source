@@ -1486,6 +1486,11 @@ body.folder-browser-lightbox-open .folder-browser-mobile-drawer-backdrop {
   pointer-events: none;
 }
 
+.folder-browser-lightbox.mobile.chrome-hidden .folder-browser-lightbox-rotate-button {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .folder-browser-lightbox.desktop .folder-browser-lightbox-toolbar {
   background: linear-gradient(rgba(0, 0, 0, 0.58), transparent);
 }
