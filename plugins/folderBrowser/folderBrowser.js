@@ -786,6 +786,7 @@
         meta: file?.width && file?.height ? `${file.width}x${file.height}` : "",
         width: file?.width,
         height: file?.height,
+        isHEIF: isHEIFFile(file),
         thumb: image.paths?.thumbnail || image.paths?.preview || image.paths?.image,
         preview: previewPath,
         full: displayPath,
@@ -3966,6 +3967,9 @@
     }
 
     function lightboxFullSrc(imageItem) {
+      if (isMobileLayout && imageItem?.isHEIF) {
+        return lightboxPreviewSrc(imageItem);
+      }
       return imageItem?.full || imageItem?.original || lightboxPreviewSrc(imageItem);
     }
 
