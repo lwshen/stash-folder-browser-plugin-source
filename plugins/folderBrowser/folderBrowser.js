@@ -289,6 +289,12 @@
     }
   `;
 
+  const FOLDER_COPY_MUTATION = `
+    mutation FolderBrowserFolderCopy($path: String!, $destination: String!, $basename: String) {
+      folderCopy(path: $path, destination_folder: $destination, destination_basename: $basename)
+    }
+  `;
+
   const FOLDER_DELETE_MUTATION = `
     mutation FolderBrowserFolderDelete($path: String!) {
       folderDelete(path: $path)
@@ -309,6 +315,12 @@
         type
         media_type
       }
+    }
+  `;
+
+  const FILE_COPY_MUTATION = `
+    mutation FolderBrowserFileCopy($path: String!, $destination: String!, $basename: String) {
+      fileCopy(path: $path, destination_folder: $destination, destination_basename: $basename)
     }
   `;
 
@@ -799,6 +811,10 @@
     return "文件";
   }
 
+  function isDirectoryEntry(entry) {
+    return entry?.type === "DIRECTORY" || entry?.media_type === "DIRECTORY";
+  }
+
   function fileEntrySortValue(entry, sortKey) {
     if (sortKey === "filesize") return Number(entry.size) || 0;
     if (sortKey === "file_mod_time" || sortKey === "created_at") return new Date(entry.mod_time || 0).getTime() || 0;
@@ -1161,6 +1177,7 @@
     onCreateFolder,
     onRenameFolder,
     onMoveFolder,
+    onCopyFolder,
     onDeleteFolder,
     onControlsToggle,
     controlsOpen,
@@ -1292,6 +1309,7 @@
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建目录"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onRenameFolder }, "重命名"),
                   React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onMoveFolder }, "移动"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onCopyFolder }, "复制"),
                   React.createElement(Button, { size: "sm", variant: "danger", disabled: !canActOnCurrentFolder, onClick: onDeleteFolder }, "删除")
                 )
               )
@@ -1301,7 +1319,7 @@
     );
   }
 
-  function MobileSelectionBar({ selectedCount, selectedImageCount, onDownload, onMove, onRename, onDelete, onClear }) {
+  function MobileSelectionBar({ selectedCount, selectedImageCount, onDownload, onMove, onCopy, onRename, onDelete, onClear }) {
     if (!selectedCount) return null;
 
     return React.createElement(
@@ -1311,6 +1329,7 @@
       React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
       React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount !== 1, onClick: onRename }, "重命名"),
       React.createElement(Button, { size: "sm", variant: "secondary", onClick: onMove }, "移动"),
+      React.createElement(Button, { size: "sm", variant: "secondary", onClick: onCopy }, "复制"),
       React.createElement(Button, { size: "sm", variant: "danger", onClick: onDelete }, "删除"),
       React.createElement(Button, { size: "sm", variant: "link", onClick: onClear }, "取消")
     );
@@ -3074,7 +3093,7 @@
     );
   }
 
-  function ContextMenu({ menu, onOpen, onDownload, onRename, onMove, onDelete, onClose }) {
+  function ContextMenu({ menu, onOpen, onDownload, onRename, onMove, onCopy, onDelete, onClose }) {
     if (!menu) return null;
 
     function stopMenuEvent(event) {
@@ -3132,6 +3151,7 @@
       item("打开", onOpen),
       item("下载", onDownload),
       item("移动", onMove),
+      item("复制到", onCopy),
       item("重命名", onRename),
       item("删除", onDelete, { danger: true })
     );
@@ -3146,6 +3166,7 @@
     onDownload,
     onRename,
     onMove,
+    onCopy,
     onDelete,
     onClear,
     onCreateFolder,
@@ -3162,6 +3183,7 @@
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount > 1 || !canAct, onClick: onRename }, "重命名"),
         React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canAct, onClick: onMove }, "移动"),
+        React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canAct, onClick: onCopy }, "复制"),
         React.createElement(Button, { size: "sm", variant: "danger", disabled: !canAct, onClick: onDelete }, "删除")
       ),
       selectedCount
@@ -3175,7 +3197,7 @@
     );
   }
 
-  function MoveTargetDialog({ open, title, folderTree, selectedFolderID, currentFolderID, onSelect, onToggle, onCancel, onConfirm }) {
+  function MoveTargetDialog({ open, title, confirmLabel = "移动到这里", folderTree, selectedFolderID, currentFolderID, onSelect, onToggle, onCancel, onConfirm }) {
     if (!open) return null;
 
     function renderNode(folder, depth) {
@@ -3225,13 +3247,13 @@
           "div",
           { className: "folder-browser-dialog-actions" },
           React.createElement(Button, { size: "sm", variant: "secondary", onClick: onCancel }, "取消"),
-          React.createElement(Button, { size: "sm", variant: "primary", disabled: !selectedFolderID, onClick: onConfirm }, "移动到这里")
+          React.createElement(Button, { size: "sm", variant: "primary", disabled: !selectedFolderID, onClick: onConfirm }, confirmLabel)
         )
       )
     );
   }
 
-  function ImageLightbox({ items, index, playing, isMobileLayout = false, onClose, onNavigate, onPlayingChange, onDownload, onDelete, onMoveFile }) {
+  function ImageLightbox({ items, index, playing, isMobileLayout = false, onClose, onNavigate, onPlayingChange, onDownload, onDelete, onMoveFile, onCopyFile }) {
     const item = index === null ? null : items[index];
     const [zoom, setZoom] = React.useState(1);
     const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -3915,6 +3937,7 @@
                     { className: "folder-browser-lightbox-menu" },
                     lightboxMenuButton("删除", () => onDelete(item), { danger: true }),
                     lightboxMenuButton("移动到", () => onMoveFile?.(item)),
+                    lightboxMenuButton("复制到", () => onCopyFile?.(item)),
                     lightboxMenuButton("下载", () => onDownload(item)),
                     lightboxMenuButton("幻灯片设置", () => setSlideshowSettingsOpen((current) => !current), { keepOpen: true }),
                     slideshowSettingsOpen
@@ -4712,6 +4735,22 @@
       ],
       [selectedScenes, selectedImages]
     );
+    const selectedCopyEntries = React.useMemo(
+      () => [
+        ...selectedScenes.map((item) => {
+          const file = primarySceneFile(item);
+          return file?.path
+            ? { path: file.path, basename: file.basename || item.title || pathBasename(file.path), type: "FILE", media_type: "VIDEO" }
+            : null;
+        }),
+        ...selectedImages.map((item) =>
+          item.path
+            ? { path: item.path, basename: item.basename || item.title || pathBasename(item.path), type: "FILE", media_type: "IMAGE" }
+            : null
+        ),
+      ].filter(Boolean),
+      [selectedScenes, selectedImages]
+    );
 
     const toggleSceneSelection = React.useCallback((sceneID, selected) => {
       setSelectedSceneIDs((current) => {
@@ -4933,6 +4972,12 @@
       openEntryMoveDialog(entry);
     }
 
+    function copyFileEntry(item) {
+      const entry = item?.entry;
+      if (!entry) return;
+      openEntryCopyDialog(entry);
+    }
+
     async function deleteFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
@@ -4973,7 +5018,7 @@
       event.preventDefault();
       event.stopPropagation();
       const entry = item?.entry;
-      const isDirectory = entry?.type === "DIRECTORY" || entry?.media_type === "DIRECTORY";
+      const isDirectory = isDirectoryEntry(entry);
       const canOpen = isDirectory || item?.scene || item?.imageItem;
       setContextMenu({
         kind: "entry",
@@ -4984,6 +5029,7 @@
           { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
           ...(isDirectory ? [{ label: "新建目录", onClick: () => createFolderAt(entry.path) }] : []),
           { label: "移动", onClick: () => moveFileEntry(item) },
+          { label: "复制到", onClick: () => copyFileEntry(item) },
           { label: "重命名", onClick: () => renameFileEntry(item) },
           { label: "删除", danger: true, onClick: () => deleteFileEntry(item) },
         ],
@@ -5004,6 +5050,7 @@
           { label: "打开", onClick: () => onSelectFolder(folder) },
           { label: "新建目录", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
           { label: "移动", disabled: !canMutate, onClick: () => moveFileEntry({ entry }) },
+          { label: "复制到", disabled: !canMutate, onClick: () => copyFileEntry({ entry }) },
           { label: "重命名", disabled: !canMutate, onClick: () => renameFileEntry({ entry }) },
           { label: "删除", danger: true, disabled: !canMutate, onClick: () => deleteFileEntry({ entry }) },
         ],
@@ -5070,6 +5117,7 @@
         const file = primarySceneFile(contextMenu.item);
         return {
           fileID: file?.id,
+          path: file?.path,
           parentFolderID: file?.parent_folder?.id,
           basename: file?.basename,
           title: contextMenu.item.title,
@@ -5077,6 +5125,7 @@
       }
       return {
         fileID: contextMenu.item.fileID,
+        path: contextMenu.item.path,
         parentFolderID: contextMenu.item.parentFolderID,
         basename: contextMenu.item.basename,
         title: contextMenu.item.title,
@@ -5112,6 +5161,20 @@
         if (contextMenu?.kind === "video") setSelectedSceneIDs((current) => current.filter((id) => id !== contextMenu.item.id));
         if (contextMenu?.kind === "image") setSelectedImageIDs((current) => current.filter((id) => id !== contextMenu.item.imageID));
       });
+    }
+
+    function copyContextMedia() {
+      const file = contextFileInfo();
+      if (!file.path) {
+        setError("找不到文件路径，无法复制。");
+        return;
+      }
+      openPathCopyDialog(`复制 ${file.basename || file.title || "文件"}`, [{
+        path: file.path,
+        basename: file.basename || file.title || pathBasename(file.path),
+        type: "FILE",
+        media_type: contextMenu?.kind === "video" ? "VIDEO" : "IMAGE",
+      }]);
     }
 
     async function renameContextMedia() {
@@ -5251,6 +5314,19 @@
       });
     }
 
+    function copyImageItem(item) {
+      if (!item?.path) {
+        setError("找不到图片文件路径，无法复制。");
+        return;
+      }
+      openPathCopyDialog(`复制 ${item.basename || item.title || "图片"}`, [{
+        path: item.path,
+        basename: item.basename || item.title || pathBasename(item.path),
+        type: "FILE",
+        media_type: "IMAGE",
+      }]);
+    }
+
     function initialMoveTargetIDForEntry(entry) {
       const sourcePath = normalizePathKey(entry?.path);
       const parentPath = normalizePathKey(entry?.parent_path) || parentPathForPath(sourcePath);
@@ -5271,26 +5347,60 @@
       if (!entry?.path || !folderTree.length) return;
       setMoveTargetFolderID(initialMoveTargetIDForEntry(entry));
       setMoveDialog({
+        mode: "move",
         title: `移动 ${entry.basename || pathBasename(entry.path) || "文件"}`,
         entry,
+      });
+    }
+
+    function openEntryCopyDialog(entry) {
+      if (!entry?.path || !folderTree.length) return;
+      setMoveTargetFolderID(initialMoveTargetIDForEntry(entry));
+      setMoveDialog({
+        mode: "copy",
+        title: `复制 ${entry.basename || pathBasename(entry.path) || "文件"}`,
+        entry,
+        confirmLabel: "复制到这里",
       });
     }
 
     function openMoveDialog(title, fileIDs, onDone) {
       if (!fileIDs.length || !currentFolder) return;
       setMoveTargetFolderID(currentFolder.id);
-      setMoveDialog({ title, fileIDs, onDone });
+      setMoveDialog({ mode: "move", title, fileIDs, onDone });
+    }
+
+    function openPathCopyDialog(title, entries, onDone) {
+      const copyEntries = (entries || []).filter((entry) => entry?.path);
+      if (!copyEntries.length || !folderTree.length) {
+        setError("找不到文件路径，无法复制。");
+        return;
+      }
+      const firstEntryTarget = initialMoveTargetIDForEntry(copyEntries[0]);
+      const currentTreeNode = currentFolder?.id ? findTreeNode(folderTree, currentFolder.id) : null;
+      setMoveTargetFolderID(currentTreeNode?.id || firstEntryTarget || folderTree[0]?.id || null);
+      setMoveDialog({
+        mode: "copy",
+        title,
+        copyEntries,
+        onDone,
+        confirmLabel: "复制到这里",
+      });
     }
 
     function moveSelectedMedia() {
       openMoveDialog(`移动 ${selectedFileIDs.length} 个文件`, selectedFileIDs, clearSelection);
     }
 
+    function copySelectedMedia() {
+      openPathCopyDialog(`复制 ${selectedCopyEntries.length} 个文件`, selectedCopyEntries);
+    }
+
     async function confirmEntryMoveDialog() {
       const entry = moveDialog?.entry;
       const destinationFolder = findTreeNode(folderTree, moveTargetFolderID);
       if (!entry?.path || !destinationFolder?.path) return;
-      const isDirectory = entry.type === "DIRECTORY" || entry.media_type === "DIRECTORY";
+      const isDirectory = isDirectoryEntry(entry);
       setLoading(true);
       setError("");
       try {
@@ -5322,7 +5432,36 @@
       }
     }
 
+    async function confirmCopyDialog() {
+      const destinationFolder = findTreeNode(folderTree, moveTargetFolderID);
+      const entries = moveDialog?.copyEntries || (moveDialog?.entry ? [moveDialog.entry] : []);
+      if (!entries.length || !destinationFolder?.path) return;
+      setLoading(true);
+      setError("");
+      try {
+        await Promise.all(entries.map((entry) =>
+          callGQL(isDirectoryEntry(entry) ? FOLDER_COPY_MUTATION : FILE_COPY_MUTATION, {
+            path: entry.path,
+            destination: destinationFolder.path,
+            basename: null,
+          })
+        ));
+        moveDialog.onDone?.();
+        setMoveDialog(null);
+        setMoveTargetFolderID(null);
+        refreshFoldersAndContent();
+      } catch (e) {
+        setError(friendlyFileApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    }
+
     async function confirmMoveDialog() {
+      if (moveDialog?.mode === "copy") {
+        await confirmCopyDialog();
+        return;
+      }
       if (moveDialog?.entry) {
         await confirmEntryMoveDialog();
         return;
@@ -5394,6 +5533,12 @@
       await moveFileEntry({ entry });
     }
 
+    async function copyCurrentFolder() {
+      const entry = folderActionEntry(currentFolder);
+      if (!entry || !canMutateFolder(currentFolder)) return;
+      copyFileEntry({ entry });
+    }
+
     async function deleteCurrentFolder() {
       const entry = folderActionEntry(currentFolder);
       if (!entry || !canMutateFolder(currentFolder)) return;
@@ -5414,6 +5559,14 @@
         return;
       }
       moveCurrentFolder();
+    }
+
+    function copyToolbarTarget() {
+      if (selectedMediaCount) {
+        copySelectedMedia();
+        return;
+      }
+      copyCurrentFolder();
     }
 
     function deleteToolbarTarget() {
@@ -5437,6 +5590,7 @@
           onDownload: downloadSelectedImages,
           onRename: renameToolbarTarget,
           onMove: moveToolbarTarget,
+          onCopy: copyToolbarTarget,
           onDelete: deleteToolbarTarget,
           onClear: clearSelection,
           onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
@@ -5632,6 +5786,7 @@
                   onCreateFolder: currentFolder ? () => createFolderAt(currentFolder.path) : undefined,
                   onRenameFolder: renameCurrentFolder,
                   onMoveFolder: moveCurrentFolder,
+                  onCopyFolder: copyCurrentFolder,
                   onDeleteFolder: deleteCurrentFolder,
                   onActiveViewChange: setActiveView,
                   onSortChange,
@@ -5709,10 +5864,12 @@
             onDownload: downloadImageItem,
             onDelete: deleteImageItem,
             onMoveFile: moveImageItem,
+            onCopyFile: copyImageItem,
           }),
           React.createElement(MoveTargetDialog, {
             open: Boolean(moveDialog),
             title: moveDialog?.title || "选择目标目录",
+            confirmLabel: moveDialog?.confirmLabel,
             folderTree,
             selectedFolderID: moveTargetFolderID,
             currentFolderID: currentFolder?.id,
@@ -5730,6 +5887,7 @@
                   selectedImageCount: selectedImages.length,
                   onDownload: downloadSelectedImages,
                   onMove: moveSelectedMedia,
+                  onCopy: copySelectedMedia,
                   onRename: renameSelectedMedia,
                   onDelete: deleteSelectedMedia,
                   onClear: clearSelection,
@@ -5743,6 +5901,7 @@
           onDownload: downloadContextMedia,
           onRename: renameContextMedia,
           onMove: moveContextMedia,
+          onCopy: copyContextMedia,
           onDelete: deleteContextMedia,
           onClose: () => setContextMenu(null),
         })
