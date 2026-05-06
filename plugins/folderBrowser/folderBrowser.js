@@ -4124,7 +4124,29 @@
       setLandscape((current) => !current);
     }
 
-    function maybeToggleLandscapeFromTap(event, gesture) {
+    function toggleImageZoomFromTap(event) {
+      if (zoom > 1.05) {
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+        return;
+      }
+      const stage = stageRef.current;
+      if (!stage) {
+        setZoom(2.5);
+        setPan({ x: 0, y: 0 });
+        return;
+      }
+      const point = relativeStagePoint(stage, { x: event.clientX, y: event.clientY });
+      const nextZoom = 2.5;
+      const ratio = nextZoom / Math.max(1, zoom);
+      setPan({
+        x: pan.x + (point.x - pan.x) * (1 - ratio),
+        y: pan.y + (point.y - pan.y) * (1 - ratio),
+      });
+      setZoom(nextZoom);
+    }
+
+    function maybeHandleDoubleTap(event, gesture) {
       if (!isMobileLayout) return false;
       const now = Date.now();
       const last = lastTapRef.current;
@@ -4135,7 +4157,11 @@
       ) {
         lastTapRef.current = null;
         suppressNextClick();
-        toggleLandscape();
+        if (event.target.closest?.(".folder-browser-lightbox-image")) {
+          toggleImageZoomFromTap(event);
+        } else {
+          toggleLandscape();
+        }
         return true;
       }
       lastTapRef.current = { time: now, x: event.clientX, y: event.clientY };
@@ -4267,7 +4293,7 @@
             suppressNextClick();
             onNavigate(dx < 0 ? 1 : -1);
           } else if (absX < 12 && absY < 12 && elapsed < 380) {
-            if (!maybeToggleLandscapeFromTap(event, gesture)) {
+            if (!maybeHandleDoubleTap(event, gesture)) {
               revealChrome();
             }
           }
@@ -4374,6 +4400,14 @@
           React.createElement(
             "div",
             { className: "folder-browser-lightbox-actions" },
+            isMobileLayout
+              ? lightboxIconButton(
+                  "folder-browser-lightbox-rotate-button",
+                  landscape ? "切回竖屏" : "切换横屏",
+                  toggleLandscape,
+                  iconNode(faRedoAlt, "⟳")
+                )
+              : null,
             lightboxIconButton(
               playing ? "active" : "",
               playing ? "停止幻灯片" : "播放幻灯片",
