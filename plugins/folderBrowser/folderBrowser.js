@@ -34,6 +34,9 @@
   const WALL_GAP = 4;
   const MOBILE_MEDIA_WINDOW_LIMIT = 1000;
   const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
+  const PULL_REFRESH_TRIGGER_DISTANCE = 88;
+  const PULL_REFRESH_MAX_OFFSET = 72;
+  const PULL_REFRESH_HOLD_OFFSET = 58;
   const DEFAULT_SIDEBAR_WIDTH = 320;
   const MIN_SIDEBAR_WIDTH = 220;
   const MAX_SIDEBAR_WIDTH = 640;
@@ -4941,7 +4944,7 @@
     const sceneWallRef = React.useRef(null);
     const imageWallRef = React.useRef(null);
     const mobileScrollFrameRef = React.useRef(null);
-    const pullRefreshRef = React.useRef({ tracking: false, startY: 0, armed: false });
+    const pullRefreshRef = React.useRef({ tracking: false, startX: 0, startY: 0, armed: false });
     const initialSortState = savedState?.sortState?.key === "basename"
       ? { ...savedState.sortState, key: "filename" }
       : savedState?.sortState;
@@ -4988,6 +4991,7 @@
     const [loadingEntries, setLoadingEntries] = React.useState(false);
     const [uploadStatus, setUploadStatus] = React.useState(null);
     const [mobileScrollMetrics, setMobileScrollMetrics] = React.useState({ top: 0, height: 0 });
+    const [pullRefresh, setPullRefresh] = React.useState({ distance: 0, ready: false, refreshing: false, tracking: false });
     const [error, setError] = React.useState("");
 
     React.useEffect(() => {
@@ -5871,16 +5875,19 @@
     }, [scheduleMobileScrollMetrics]);
 
     function resetPullRefresh() {
-      pullRefreshRef.current = { tracking: false, startY: 0, armed: false };
+      pullRefreshRef.current = { tracking: false, startX: 0, startY: 0, armed: false };
+      setPullRefresh({ distance: 0, ready: false, refreshing: false, tracking: false });
     }
 
     function handleScrollAreaTouchStart(event) {
       if (!isMobileLayout || event.touches?.length !== 1) return;
       const node = scrollAreaRef.current;
       if (!node || node.scrollTop > 0) return;
+      const touch = event.touches[0];
       pullRefreshRef.current = {
         tracking: true,
-        startY: event.touches[0].clientY,
+        startX: touch.clientX,
+        startY: touch.clientY,
         armed: false,
       };
     }
@@ -5893,20 +5900,33 @@
         resetPullRefresh();
         return;
       }
-      const distance = event.touches[0].clientY - state.startY;
+      const touch = event.touches[0];
+      const distance = touch.clientY - state.startY;
+      const horizontalDistance = Math.abs(touch.clientX - state.startX);
       if (distance < 0) {
         resetPullRefresh();
         return;
       }
+      if (horizontalDistance > distance && horizontalDistance > 14) {
+        resetPullRefresh();
+        return;
+      }
       if (distance > 12) event.preventDefault();
-      state.armed = distance >= 88;
+      const offset = Math.min(PULL_REFRESH_MAX_OFFSET, Math.round(distance * 0.52));
+      state.armed = distance >= PULL_REFRESH_TRIGGER_DISTANCE;
+      setPullRefresh({ distance: offset, ready: state.armed, refreshing: false, tracking: true });
     }
 
     function handleScrollAreaTouchEnd() {
       const state = pullRefreshRef.current;
       const shouldRefresh = isMobileLayout && state.tracking && state.armed;
+      pullRefreshRef.current = { tracking: false, startX: 0, startY: 0, armed: false };
+      if (shouldRefresh) {
+        setPullRefresh({ distance: PULL_REFRESH_HOLD_OFFSET, ready: true, refreshing: true, tracking: false });
+        window.setTimeout(refreshCurrentPage, 180);
+        return;
+      }
       resetPullRefresh();
-      if (shouldRefresh) refreshCurrentPage();
     }
 
     function openFileEntry(item) {
@@ -6875,6 +6895,22 @@
       ((activeView === "video" && visibleVideos.length === 0) ||
         (activeView === "image" && visibleImages.length === 0) ||
         (activeView === "other" && otherEntryItems.length === 0));
+    const pullRefreshOffset = isMobileLayout
+      ? Math.round(pullRefresh.refreshing ? PULL_REFRESH_HOLD_OFFSET : pullRefresh.distance)
+      : 0;
+    const pullRefreshScrollAreaClassName =
+      "folder-browser-scroll-area" +
+      (pullRefreshOffset > 0 ? " pull-refresh-visible" : "") +
+      (pullRefresh.ready ? " pull-refresh-ready" : "") +
+      (pullRefresh.refreshing ? " pull-refresh-refreshing" : "") +
+      (pullRefresh.tracking ? " pull-refresh-pulling" : "");
+    const pullRefreshStyle = isMobileLayout
+      ? {
+          "--folder-pull-refresh-offset": `${pullRefreshOffset}px`,
+          "--folder-pull-refresh-opacity": Math.min(1, pullRefreshOffset / 46),
+          "--folder-pull-refresh-rotation": `${Math.min(180, Math.round((pullRefreshOffset / PULL_REFRESH_HOLD_OFFSET) * 180))}deg`,
+        }
+      : undefined;
 
     function renderVideoSection() {
       if (!showVideoSection) return null;
@@ -7063,8 +7099,9 @@
           React.createElement(
             "div",
             {
-              className: "folder-browser-scroll-area",
+              className: pullRefreshScrollAreaClassName,
               ref: scrollAreaRef,
+              style: pullRefreshStyle,
               onClick: (event) => {
                 if (!event.target.closest?.(".folder-browser-wall-tile")) setTouchPreviewSceneID(null);
               },
@@ -7080,26 +7117,41 @@
                 setTouchPreviewSceneID(null);
               },
             },
-            React.createElement(
-              "div",
-              { className: "folder-browser-sections" },
-              renderVideoSection(),
-              renderImageSection(),
-              renderOtherSection()
-            ),
-            activeViewEmpty
+            isMobileLayout
               ? React.createElement(
                   "div",
-                  { className: "folder-browser-empty" },
-                  activeView === "video"
-                    ? "This folder has no scanned scenes."
-                    : activeView === "image"
-                      ? "This folder has no scanned images."
-                      : activeView === "other"
-                        ? "当前文件夹没有其他文件。"
-                        : "当前文件夹没有可显示条目。"
+                  { className: "folder-browser-pull-refresh-indicator", "aria-hidden": "true" },
+                  React.createElement(
+                    "span",
+                    { className: "folder-browser-pull-refresh-badge" },
+                    iconNode(faSyncAlt || faRedoAlt, "↻")
+                  )
                 )
-              : null
+              : null,
+            React.createElement(
+              "div",
+              { className: "folder-browser-scroll-content" },
+              React.createElement(
+                "div",
+                { className: "folder-browser-sections" },
+                renderVideoSection(),
+                renderImageSection(),
+                renderOtherSection()
+              ),
+              activeViewEmpty
+                ? React.createElement(
+                    "div",
+                    { className: "folder-browser-empty" },
+                    activeView === "video"
+                      ? "This folder has no scanned scenes."
+                      : activeView === "image"
+                        ? "This folder has no scanned images."
+                        : activeView === "other"
+                          ? "当前文件夹没有其他文件。"
+                          : "当前文件夹没有可显示条目。"
+                  )
+                : null
+            )
           ),
           React.createElement(ImageLightbox, {
             items: lightboxImages,

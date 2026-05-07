@@ -1087,11 +1087,73 @@
 }
 
 .folder-browser-scroll-area {
+  --folder-pull-refresh-offset: 0px;
+  --folder-pull-refresh-opacity: 0;
+  --folder-pull-refresh-rotation: 0deg;
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   overscroll-behavior-y: contain;
   padding-right: 0.25rem;
+  position: relative;
+}
+
+.folder-browser-scroll-content {
+  transform: translateY(var(--folder-pull-refresh-offset));
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.folder-browser-scroll-area.pull-refresh-pulling .folder-browser-scroll-content {
+  transition: none;
+}
+
+.folder-browser-pull-refresh-indicator {
+  align-items: center;
+  display: flex;
+  height: 4.5rem;
+  justify-content: center;
+  left: 0;
+  opacity: var(--folder-pull-refresh-opacity);
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transform: translateY(calc(-4.5rem + var(--folder-pull-refresh-offset)));
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 2;
+}
+
+.folder-browser-scroll-area.pull-refresh-pulling .folder-browser-pull-refresh-indicator {
+  transition: none;
+}
+
+.folder-browser-pull-refresh-badge {
+  align-items: center;
+  backdrop-filter: blur(14px);
+  background: rgba(14, 16, 20, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 0.65rem 1.75rem rgba(0, 0, 0, 0.24);
+  color: rgba(255, 255, 255, 0.68);
+  display: flex;
+  height: 2.25rem;
+  justify-content: center;
+  width: 2.25rem;
+}
+
+.folder-browser-pull-refresh-badge .fa-icon {
+  transform: rotate(var(--folder-pull-refresh-rotation));
+  transition: color 150ms ease, transform 80ms linear;
+}
+
+.folder-browser-scroll-area.pull-refresh-ready .folder-browser-pull-refresh-badge {
+  border-color: rgba(123, 190, 255, 0.72);
+  color: #cfe7ff;
+}
+
+.folder-browser-scroll-area.pull-refresh-refreshing .folder-browser-pull-refresh-badge .fa-icon {
+  animation: folderBrowserSpin 820ms linear infinite;
 }
 
 .folder-browser-section {
