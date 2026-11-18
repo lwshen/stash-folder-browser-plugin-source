@@ -15,4 +15,4 @@ git push origin main
 echo
 echo "Repository pushed."
 echo "Stash source URL:"
-echo "https://raw.githubusercontent.com/Warden630/stash-folder-browser-plugin-source/main/index.yml"
+echo "https://raw.githubusercontent.com/lwshen/stash-folder-browser-plugin-source/main/index.yml"

@@ -596,6 +596,206 @@
     }
   `;
 
+  // The file management operations above (folderListEntries, folderCreate,
+  // fileUpload, ... and the /folder-browser/file endpoint) only exist in a
+  // patched Stash backend. Upstream Stash rejects them with "Cannot query
+  // field ...", so detect what the running backend offers and fall back to
+  // upstream APIs (findFolder/findFiles/moveFiles) where possible.
+  const BACKEND_FEATURES_QUERY = `
+    query FolderBrowserBackendFeatures {
+      queryType: __type(name: "Query") { fields { name } }
+      mutationType: __type(name: "Mutation") { fields { name } }
+    }
+  `;
+
+  const UPSTREAM_FOLDER_LISTING_FILE_FIELDS = `
+    __typename
+    id
+    path
+    basename
+    size
+    mod_time
+    ... on GalleryFile { galleries { id } }
+  `;
+
+  const UPSTREAM_FOLDER_LISTING_BY_ID_QUERY = `
+    query FolderBrowserUpstreamListingByID($folderID: ID!, $fileFilter: FileFilterType) {
+      findFolder(id: $folderID) {
+        id
+        path
+        sub_folders { ${FOLDER_FIELDS} zip_file { id } }
+      }
+      findFiles(file_filter: $fileFilter, filter: { per_page: -1 }) {
+        files { ${UPSTREAM_FOLDER_LISTING_FILE_FIELDS} }
+      }
+    }
+  `;
+
+  const UPSTREAM_DELETE_FILES_MUTATION = `
+    mutation FolderBrowserDeleteFiles($ids: [ID!]!) {
+      deleteFiles(ids: $ids)
+    }
+  `;
+
+  // A zip gallery's file is the gallery's primary file, which deleteFiles
+  // refuses to delete; destroying the gallery with delete_file removes it.
+  const UPSTREAM_GALLERY_DESTROY_MUTATION = `
+    mutation FolderBrowserGalleryDestroy($input: GalleryDestroyInput!) {
+      galleryDestroy(input: $input)
+    }
+  `;
+
+  const UPSTREAM_FOLDER_BY_PATH_QUERY = `
+    query FolderBrowserUpstreamFolderByPath($path: String!) {
+      findFolder(path: $path) { id }
+    }
+  `;
+
+  const NO_BACKEND_FEATURES = Object.freeze({
+    detected: false,
+    listEntries: false,
+    fileEndpoint: false,
+    folderCreate: false,
+    folderRename: false,
+    folderMove: false,
+    folderCopy: false,
+    folderDelete: false,
+    fileRename: false,
+    fileMove: false,
+    fileCopy: false,
+    fileDelete: false,
+    fileUpload: false,
+    folderUpload: false,
+  });
+
+  const UNSUPPORTED_BACKEND_HINT = "当前 Stash 后端不支持此操作（需要带文件管理扩展的 Stash）。";
+
+  let backendFeaturesCache = null;
+  let backendFeaturesPromise = null;
+
+  function loadBackendFeatures() {
+    if (backendFeaturesCache) return Promise.resolve(backendFeaturesCache);
+    if (!backendFeaturesPromise) {
+      backendFeaturesPromise = callGQL(BACKEND_FEATURES_QUERY, {})
+        .then((data) => {
+          const queries = new Set((data?.queryType?.fields ?? []).map((field) => field.name));
+          const mutations = new Set((data?.mutationType?.fields ?? []).map((field) => field.name));
+          backendFeaturesCache = Object.freeze({
+            detected: true,
+            listEntries: queries.has("folderListEntries"),
+            // The raw file endpoint ships together with folderListEntries.
+            fileEndpoint: queries.has("folderListEntries"),
+            folderCreate: mutations.has("folderCreate"),
+            folderRename: mutations.has("folderRename"),
+            folderMove: mutations.has("folderMove"),
+            folderCopy: mutations.has("folderCopy"),
+            folderDelete: mutations.has("folderDelete"),
+            fileRename: mutations.has("fileRename"),
+            fileMove: mutations.has("fileMove"),
+            fileCopy: mutations.has("fileCopy"),
+            fileDelete: mutations.has("fileDelete"),
+            fileUpload: mutations.has("fileUpload"),
+            folderUpload: mutations.has("folderUpload"),
+          });
+          return backendFeaturesCache;
+        })
+        .catch((error) => {
+          console.warn("[Folder Browser] Could not detect backend features; using upstream Stash APIs only.", error);
+          backendFeaturesPromise = null;
+          return NO_BACKEND_FEATURES;
+        });
+    }
+    return backendFeaturesPromise;
+  }
+
+  function useBackendFeatures() {
+    const [features, setFeatures] = React.useState(backendFeaturesCache || NO_BACKEND_FEATURES);
+    React.useEffect(() => {
+      let cancelled = false;
+      loadBackendFeatures().then((result) => {
+        if (!cancelled) setFeatures(result);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+    return features;
+  }
+
+  function upstreamFileMediaType(file) {
+    switch (file?.__typename) {
+      case "VideoFile":
+        return "VIDEO";
+      case "ImageFile":
+        return "IMAGE";
+      case "GalleryFile":
+        return "GALLERY";
+      default:
+        return "FILE";
+    }
+  }
+
+  function upstreamFileExtension(basename) {
+    const name = String(basename || "");
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.slice(dot).toLowerCase() : "";
+  }
+
+  async function loadUpstreamFolderEntries(folderID) {
+    const data = await callGQL(UPSTREAM_FOLDER_LISTING_BY_ID_QUERY, {
+      folderID,
+      fileFilter: { parent_folder: { value: [folderID], modifier: "INCLUDES", depth: 0 } },
+    });
+    const folder = data.findFolder;
+    // A scanned zip is also stored as a virtual folder (zip_file set) at the
+    // zip's own path; list it once, as the file, like a directory listing.
+    const realSubFolders = (folder?.sub_folders ?? []).filter((subFolder) => !subFolder.zip_file);
+    const folderEntries = realSubFolders.map((subFolder) => ({
+      path: subFolder.path,
+      basename: subFolder.basename || pathBasename(subFolder.path),
+      parent_path: folder.path,
+      type: "DIRECTORY",
+      media_type: "DIRECTORY",
+      extension: "",
+      size: 0,
+      // Folder.mod_time is not requested: Stash stores none for zip
+      // folders, and the non-null field then fails the whole query.
+      folder: subFolder,
+    }));
+    const fileEntries = (data.findFiles?.files ?? []).map((file) => ({
+      path: file.path,
+      basename: file.basename || pathBasename(file.path),
+      parent_path: folder?.path || parentPathForPath(file.path, file.basename),
+      type: "FILE",
+      media_type: upstreamFileMediaType(file),
+      extension: upstreamFileExtension(file.basename),
+      size: file.size,
+      mod_time: file.mod_time,
+      file_id: file.id,
+      parent_folder_id: folder?.id,
+      gallery_ids: (file.galleries ?? []).map((gallery) => gallery.id),
+    }));
+    return [...folderEntries, ...fileEntries];
+  }
+
+  // Lists the direct children of a folder. Uses folderListEntries when the
+  // backend provides it (includes unscanned files), otherwise only the
+  // sub-folders and files that Stash has scanned.
+  async function loadFolderEntries({ id, path }) {
+    const features = await loadBackendFeatures();
+    if (features.listEntries) {
+      const data = await callGQL(FOLDER_LIST_ENTRIES_QUERY, { path });
+      return data.folderListEntries?.entries ?? [];
+    }
+    let folderID = id && !String(id).startsWith("path:") ? id : null;
+    if (!folderID && path) {
+      const data = await callGQL(UPSTREAM_FOLDER_BY_PATH_QUERY, { path });
+      folderID = data.findFolder?.id;
+    }
+    if (!folderID) return [];
+    return loadUpstreamFolderEntries(folderID);
+  }
+
   function rootFolderFilter() {
     return {
       parent_folder: { modifier: "IS_NULL" },
@@ -1064,6 +1264,9 @@
     if (message.includes("delete_trash_path")) {
       return "删除失败：后端仍要求配置回收站路径，请确认 Stash fork 已更新并重启。";
     }
+    if (/Cannot query field|Unknown type "FolderBrowser/.test(message)) {
+      return UNSUPPORTED_BACKEND_HINT;
+    }
     return message;
   }
 
@@ -1515,7 +1718,7 @@
     previewAllVisible,
     sizeIndex,
     copyJobs,
-    canActOnCurrentFolder,
+    capabilities,
     onClearCopyJobs,
     onOpenFolders,
     onCreateFolder,
@@ -1670,13 +1873,13 @@
                 React.createElement(
                   "div",
                   { className: "folder-browser-mobile-chip-row" },
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onCreateFolder }, "新建文件夹"),
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onUploadFiles }, "上传文件"),
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder, onClick: onUploadFolder }, "上传文件夹"),
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onRenameFolder }, "重命名"),
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onMoveFolder }, "移动"),
-                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canActOnCurrentFolder, onClick: onCopyFolder }, "复制"),
-                  React.createElement(Button, { size: "sm", variant: "danger", disabled: !canActOnCurrentFolder, onClick: onDeleteFolder }, "删除")
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder || !capabilities.createFolder, onClick: onCreateFolder }, "新建文件夹"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder || !capabilities.uploadFiles, onClick: onUploadFiles }, "上传文件"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !currentFolder || !capabilities.uploadFolder, onClick: onUploadFolder }, "上传文件夹"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !capabilities.renameFolder, onClick: onRenameFolder }, "重命名"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !capabilities.moveFolder, onClick: onMoveFolder }, "移动"),
+                  React.createElement(Button, { size: "sm", variant: "secondary", disabled: !capabilities.copyFolder, onClick: onCopyFolder }, "复制"),
+                  React.createElement(Button, { size: "sm", variant: "danger", disabled: !capabilities.deleteFolder, onClick: onDeleteFolder }, "删除")
                 )
               )
             )
@@ -1685,7 +1888,7 @@
     );
   }
 
-  function MobileSelectionBar({ selectedCount, selectedImageCount, onDownload, onMove, onCopy, onRename, onDelete, onClear }) {
+  function MobileSelectionBar({ selectedCount, selectedImageCount, canCopy = true, onDownload, onMove, onCopy, onRename, onDelete, onClear }) {
     if (!selectedCount) return null;
 
     return React.createElement(
@@ -1695,7 +1898,7 @@
       React.createElement(Button, { size: "sm", variant: "secondary", disabled: !selectedImageCount, onClick: onDownload }, "下载"),
       React.createElement(Button, { size: "sm", variant: "secondary", disabled: selectedCount !== 1, onClick: onRename }, "重命名"),
       React.createElement(Button, { size: "sm", variant: "secondary", onClick: onMove }, "移动"),
-      React.createElement(Button, { size: "sm", variant: "secondary", onClick: onCopy }, "复制"),
+      React.createElement(Button, { size: "sm", variant: "secondary", disabled: !canCopy, onClick: onCopy }, "复制"),
       React.createElement(Button, { size: "sm", variant: "danger", onClick: onDelete }, "删除"),
       React.createElement(Button, { size: "sm", variant: "link", onClick: onClear }, "取消")
     );
@@ -3501,7 +3704,7 @@
     );
   }
 
-  function ContextMenu({ menu, onOpen, onDownload, onRename, onMove, onCopy, onDelete, onProperties, onClose }) {
+  function ContextMenu({ menu, canCopy = true, onOpen, onDownload, onRename, onMove, onCopy, onDelete, onProperties, onClose }) {
     if (!menu) return null;
 
     function stopMenuEvent(event) {
@@ -3512,8 +3715,10 @@
       return React.createElement(
         "button",
         {
+          key: label,
           className: options.danger ? "danger" : undefined,
           disabled: options.disabled,
+          title: options.title,
           onClick: () => {
             onClose();
             onClick();
@@ -3560,7 +3765,7 @@
       item("属性", onProperties),
       item("下载", onDownload),
       item("移动", onMove),
-      item("复制到", onCopy),
+      item("复制到", onCopy, canCopy ? {} : { disabled: true, title: `复制到：${UNSUPPORTED_BACKEND_HINT}` }),
       item("重命名", onRename),
       item("删除", onDelete, { danger: true })
     );
@@ -3568,7 +3773,7 @@
 
   function FileActionToolbar({
     currentFolder,
-    canActOnCurrentFolder,
+    capabilities,
     selectedCount,
     selectedImageCount,
     selectedSceneCount,
@@ -3583,7 +3788,11 @@
     onUploadFolder,
   }) {
     const [menuOpen, setMenuOpen] = React.useState(false);
-    const canAct = selectedCount > 0 || canActOnCurrentFolder;
+    const hasSelection = selectedCount > 0;
+    const canRename = hasSelection ? selectedCount === 1 : capabilities.renameFolder;
+    const canMove = hasSelection || capabilities.moveFolder;
+    const canCopy = hasSelection ? capabilities.copyFiles : capabilities.copyFolder;
+    const canDelete = hasSelection || capabilities.deleteFolder;
 
     React.useEffect(() => {
       if (!menuOpen) return undefined;
@@ -3615,6 +3824,7 @@
           type: "button",
           className: options.danger ? "danger" : undefined,
           disabled: options.disabled,
+          title: options.title,
           onClick: () => {
             setMenuOpen(false);
             onClick?.();
@@ -3645,14 +3855,14 @@
           ? React.createElement(
               "div",
               { className: "folder-browser-toolbar-menu" },
-              action("新建文件夹", onCreateFolder, { disabled: !currentFolder }),
-              action("上传文件", onUploadFiles, { disabled: !currentFolder }),
-              action("上传文件夹", onUploadFolder, { disabled: !currentFolder }),
+              action("新建文件夹", onCreateFolder, { disabled: !currentFolder || !capabilities.createFolder, title: capabilities.createFolder ? undefined : capabilities.hint }),
+              action("上传文件", onUploadFiles, { disabled: !currentFolder || !capabilities.uploadFiles, title: capabilities.uploadFiles ? undefined : capabilities.hint }),
+              action("上传文件夹", onUploadFolder, { disabled: !currentFolder || !capabilities.uploadFolder, title: capabilities.uploadFolder ? undefined : capabilities.hint }),
               action("下载", onDownload, { disabled: !selectedImageCount }),
-              action("重命名", onRename, { disabled: selectedCount > 1 || !canAct }),
-              action("移动", onMove, { disabled: !canAct }),
-              action("复制", onCopy, { disabled: !canAct }),
-              action("删除", onDelete, { disabled: !canAct, danger: true })
+              action("重命名", onRename, { disabled: !canRename }),
+              action("移动", onMove, { disabled: !canMove }),
+              action("复制", onCopy, { disabled: !canCopy }),
+              action("删除", onDelete, { disabled: !canDelete, danger: true })
             )
           : null
       ),
@@ -4479,7 +4689,11 @@
                     { className: "folder-browser-lightbox-menu" },
                     lightboxMenuButton("删除", () => onDelete(item), { danger: true }),
                     lightboxMenuButton("移动到", () => onMoveFile?.(item)),
-                    lightboxMenuButton("复制到", () => onCopyFile?.(item)),
+                    lightboxMenuButton(
+                      "复制到",
+                      () => onCopyFile?.(item),
+                      onCopyFile ? {} : { disabled: true, title: `复制到：${UNSUPPORTED_BACKEND_HINT}` }
+                    ),
                     lightboxMenuButton("下载", () => onDownload(item)),
                     lightboxMenuButton("幻灯片设置", () => setSlideshowSettingsOpen((current) => !current), { keepOpen: true }),
                     slideshowSettingsOpen
@@ -4775,6 +4989,7 @@
     };
     const queue = [path];
     const seen = new Set();
+    const folderIDsByPath = new Map();
 
     while (queue.length) {
       if (isCancelled?.()) return null;
@@ -4785,11 +5000,11 @@
       stats.pendingFolderCount = queue.length;
 
       try {
-        const data = await callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentPath });
-        const entries = data.folderListEntries?.entries || [];
+        const entries = await loadFolderEntries({ id: folderIDsByPath.get(currentPath), path: currentPath });
         entries.forEach((entry) => {
           if (isDirectoryEntry(entry)) {
             stats.folderCount += 1;
+            if (entry.folder?.id) folderIDsByPath.set(entry.path, entry.folder.id);
             if (entry.path && !seen.has(entry.path)) queue.push(entry.path);
             return;
           }
@@ -4935,6 +5150,7 @@
     const restoreContentRef = React.useRef(true);
     const restoreScrollRef = React.useRef(true);
     const savedState = savedStateRef.current;
+    const backendFeatures = useBackendFeatures();
     const contentRef = React.useRef(null);
     const stickyRef = React.useRef(null);
     const scrollAreaRef = React.useRef(null);
@@ -5319,8 +5535,12 @@
           const initialImagePage = shouldRestoreContent ? Math.max(1, saved.imagePage || 1) : 1;
           const initialScenePageSize = scenePageSizeRef.current * initialScenePage;
           const initialImagePageSize = imagePageSizeRef.current * initialImagePage;
-          const [listingData, sceneData, imageData] = await Promise.all([
-            callGQL(FOLDER_LIST_ENTRIES_QUERY, { path: currentFolder.path }),
+          const [listingEntries, sceneData, imageData] = await Promise.all([
+            // A listing failure must not hide the scanned scenes and images.
+            loadFolderEntries(currentFolder).catch((listingError) => {
+              console.warn("[Folder Browser] Failed to list folder entries", listingError);
+              return [];
+            }),
             canQueryScannedMedia
               ? callGQL(SCENES_QUERY, {
                   folderCriterion: criterion,
@@ -5335,7 +5555,7 @@
               : Promise.resolve({ findImages: { count: 0, images: [] } }),
           ]);
           if (!cancelled) {
-            setFolderEntries(listingData.folderListEntries?.entries ?? []);
+            setFolderEntries(listingEntries);
             setScenes(sceneData.findScenes.scenes ?? []);
             setImages(imageData.findImages.images ?? []);
             setSceneTotal(sceneData.findScenes.count ?? 0);
@@ -5425,7 +5645,8 @@
 
     function selectFolderByPath(path, fallbackEntry = null) {
       const existing = findTreeNodeByPath(folderTree, path);
-      setCurrentFolder(existing || folderFromEntry(fallbackEntry || { path, basename: pathBasename(path) }));
+      const scannedFolder = fallbackEntry?.folder?.id ? asTreeNode(fallbackEntry.folder) : null;
+      setCurrentFolder(existing || scannedFolder || folderFromEntry(fallbackEntry || { path, basename: pathBasename(path) }));
       setSelectedSceneIDs([]);
       setSelectedImageIDs([]);
       setLightboxIndex(null);
@@ -5929,6 +6150,43 @@
       resetPullRefresh();
     }
 
+    // Which file operations the running backend can perform. Files scanned by
+    // Stash (entries with file_id) can be renamed/moved/deleted through the
+    // upstream moveFiles/deleteFiles mutations; everything else needs the
+    // file management extension.
+    function canRenameEntry(entry) {
+      if (!entry?.path) return false;
+      if (isDirectoryEntry(entry)) return backendFeatures.folderRename;
+      return backendFeatures.fileRename || Boolean(entry.file_id);
+    }
+
+    function canMoveEntry(entry) {
+      if (!entry?.path) return false;
+      if (isDirectoryEntry(entry)) return backendFeatures.folderMove;
+      return backendFeatures.fileMove || Boolean(entry.file_id);
+    }
+
+    function canCopyEntry(entry) {
+      if (!entry?.path) return false;
+      return isDirectoryEntry(entry) ? backendFeatures.folderCopy : backendFeatures.fileCopy;
+    }
+
+    function canDeleteEntry(entry) {
+      if (!entry?.path) return false;
+      if (isDirectoryEntry(entry)) return backendFeatures.folderDelete;
+      return backendFeatures.fileDelete || Boolean(entry.file_id);
+    }
+
+    function canDownloadEntry(item) {
+      const entry = item?.entry || item;
+      if (!entry?.path || isDirectoryEntry(entry)) return false;
+      return backendFeatures.fileEndpoint || Boolean(item?.scene || item?.imageItem);
+    }
+
+    function unsupportedAction(label, supported) {
+      return supported ? {} : { disabled: true, title: `${label}：${UNSUPPORTED_BACKEND_HINT}` };
+    }
+
     function openFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
@@ -5936,7 +6194,7 @@
         selectFolderByPath(entry.path, entry);
         return;
       }
-      const previewKind = previewKindForEntry(entry);
+      const previewKind = backendFeatures.fileEndpoint ? previewKindForEntry(entry) : "";
       if (previewKind) {
         setFilePreview({ entry, kind: previewKind });
         return;
@@ -5953,6 +6211,10 @@
     }
 
     async function createFolderAt(path) {
+      if (!backendFeatures.folderCreate) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       const basename = window.prompt("新文件夹名");
       if (!basename) return;
       setLoading(true);
@@ -5969,6 +6231,10 @@
 
     function openUploadPicker(destinationPath, mode) {
       if (!destinationPath) return;
+      if (!(mode === "folder" ? backendFeatures.folderUpload : backendFeatures.fileUpload)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       const input = document.createElement("input");
       input.type = "file";
       input.multiple = true;
@@ -6131,6 +6397,10 @@
     async function renameFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
+      if (!canRenameEntry(entry)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       const basename = window.prompt("新的名称", entry.basename || pathBasename(entry.path));
       if (!basename || basename === entry.basename) return;
       setLoading(true);
@@ -6140,8 +6410,19 @@
           await callGQL(FOLDER_RENAME_MUTATION, { path: entry.path, basename });
           if (currentFolder?.path === entry.path) selectFolderByPath(joinFolderPath(entry.parent_path || "", basename));
           refreshFoldersAndContent();
-        } else {
+        } else if (backendFeatures.fileRename) {
           await callGQL(FILE_RENAME_MUTATION, { path: entry.path, basename });
+          refreshContent();
+        } else {
+          await callGQL(MOVE_FILES_MUTATION, {
+            input: {
+              ids: [entry.file_id],
+              ...(entry.parent_folder_id
+                ? { destination_folder_id: entry.parent_folder_id }
+                : { destination_folder: entry.parent_path || parentPathForPath(entry.path) }),
+              destination_basename: basename,
+            },
+          });
           refreshContent();
         }
       } catch (e) {
@@ -6154,18 +6435,30 @@
     async function moveFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
+      if (!canMoveEntry(entry)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       openEntryMoveDialog(entry);
     }
 
     function copyFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
+      if (!canCopyEntry(entry)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       openEntryCopyDialog(entry);
     }
 
     async function deleteFileEntry(item) {
       const entry = item?.entry;
       if (!entry) return;
+      if (!canDeleteEntry(entry)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       const label = entry.basename || pathBasename(entry.path);
       const confirmed = window.confirm(`直接删除 ${label}？这个操作不可撤销。`);
       if (!confirmed) return;
@@ -6188,8 +6481,21 @@
             }
           }
           refreshFoldersAndContent();
-        } else {
+        } else if (backendFeatures.fileDelete) {
           await callGQL(FILE_DELETE_MUTATION, { path: entry.path });
+          refreshContent();
+        } else if (entry.gallery_ids?.length) {
+          await callGQL(UPSTREAM_GALLERY_DESTROY_MUTATION, {
+            input: {
+              ids: entry.gallery_ids,
+              delete_file: true,
+              delete_generated: true,
+              destroy_file_entry: true,
+            },
+          });
+          refreshContent();
+        } else {
+          await callGQL(UPSTREAM_DELETE_FILES_MUTATION, { ids: [entry.file_id] });
           refreshContent();
         }
       } catch (e) {
@@ -6230,14 +6536,14 @@
         actions: [
           { label: "打开", disabled: !canOpen, onClick: () => openFileEntry(item) },
           { label: "属性", onClick: () => openFileEntryProperties(item) },
-          ...(!isDirectory ? [{ label: "下载", onClick: () => downloadFileEntry(entry) }] : []),
-          ...(isDirectory ? [{ label: "新建文件夹", onClick: () => createFolderAt(entry.path) }] : []),
-          ...(isDirectory ? [{ label: "上传文件", onClick: () => uploadFilesHere(entry.path) }] : []),
-          ...(isDirectory ? [{ label: "上传文件夹", onClick: () => uploadFolderHere(entry.path) }] : []),
-          { label: "移动", onClick: () => moveFileEntry(item) },
-          { label: "复制到", onClick: () => copyFileEntry(item) },
-          { label: "重命名", onClick: () => renameFileEntry(item) },
-          { label: "删除", danger: true, onClick: () => deleteFileEntry(item) },
+          ...(!isDirectory ? [{ label: "下载", ...unsupportedAction("下载", canDownloadEntry(item)), onClick: () => downloadFileEntry(item) }] : []),
+          ...(isDirectory ? [{ label: "新建文件夹", ...unsupportedAction("新建文件夹", backendFeatures.folderCreate), onClick: () => createFolderAt(entry.path) }] : []),
+          ...(isDirectory ? [{ label: "上传文件", ...unsupportedAction("上传文件", backendFeatures.fileUpload), onClick: () => uploadFilesHere(entry.path) }] : []),
+          ...(isDirectory ? [{ label: "上传文件夹", ...unsupportedAction("上传文件夹", backendFeatures.folderUpload), onClick: () => uploadFolderHere(entry.path) }] : []),
+          { label: "移动", ...unsupportedAction("移动", canMoveEntry(entry)), onClick: () => moveFileEntry(item) },
+          { label: "复制到", ...unsupportedAction("复制到", canCopyEntry(entry)), onClick: () => copyFileEntry(item) },
+          { label: "重命名", ...unsupportedAction("重命名", canRenameEntry(entry)), onClick: () => renameFileEntry(item) },
+          { label: "删除", danger: true, ...unsupportedAction("删除", canDeleteEntry(entry)), onClick: () => deleteFileEntry(item) },
         ],
       });
     }
@@ -6254,9 +6560,9 @@
         y: Math.min(event.clientY, window.innerHeight - 180),
         actions: [
           { label: "属性", onClick: () => openFolderProperties(currentFolder) },
-          { label: "新建文件夹", onClick: () => createFolderAt(currentFolder.path) },
-          { label: "上传文件", onClick: () => uploadFilesHere(currentFolder.path) },
-          { label: "上传文件夹", onClick: () => uploadFolderHere(currentFolder.path) },
+          { label: "新建文件夹", ...unsupportedAction("新建文件夹", backendFeatures.folderCreate), onClick: () => createFolderAt(currentFolder.path) },
+          { label: "上传文件", ...unsupportedAction("上传文件", backendFeatures.fileUpload), onClick: () => uploadFilesHere(currentFolder.path) },
+          { label: "上传文件夹", ...unsupportedAction("上传文件夹", backendFeatures.folderUpload), onClick: () => uploadFolderHere(currentFolder.path) },
         ],
       });
     }
@@ -6274,13 +6580,13 @@
         actions: [
           { label: "打开", onClick: () => onSelectFolder(folder) },
           { label: "属性", disabled: !entry, onClick: () => openFolderProperties(folder) },
-          { label: "新建文件夹", disabled: !folder?.path, onClick: () => createFolderAt(folder.path) },
-          { label: "上传文件", disabled: !folder?.path, onClick: () => uploadFilesHere(folder.path) },
-          { label: "上传文件夹", disabled: !folder?.path, onClick: () => uploadFolderHere(folder.path) },
-          { label: "移动", disabled: !canMutate, onClick: () => moveFileEntry({ entry }) },
-          { label: "复制到", disabled: !canMutate, onClick: () => copyFileEntry({ entry }) },
-          { label: "重命名", disabled: !canMutate, onClick: () => renameFileEntry({ entry }) },
-          { label: "删除", danger: true, disabled: !canMutate, onClick: () => deleteFileEntry({ entry }) },
+          { label: "新建文件夹", disabled: !folder?.path, ...unsupportedAction("新建文件夹", backendFeatures.folderCreate), onClick: () => createFolderAt(folder.path) },
+          { label: "上传文件", disabled: !folder?.path, ...unsupportedAction("上传文件", backendFeatures.fileUpload), onClick: () => uploadFilesHere(folder.path) },
+          { label: "上传文件夹", disabled: !folder?.path, ...unsupportedAction("上传文件夹", backendFeatures.folderUpload), onClick: () => uploadFolderHere(folder.path) },
+          { label: "移动", disabled: !canMutate, ...unsupportedAction("移动", canMoveEntry(entry)), onClick: () => moveFileEntry({ entry }) },
+          { label: "复制到", disabled: !canMutate, ...unsupportedAction("复制到", canCopyEntry(entry)), onClick: () => copyFileEntry({ entry }) },
+          { label: "重命名", disabled: !canMutate, ...unsupportedAction("重命名", canRenameEntry(entry)), onClick: () => renameFileEntry({ entry }) },
+          { label: "删除", danger: true, disabled: !canMutate, ...unsupportedAction("删除", canDeleteEntry(entry)), onClick: () => deleteFileEntry({ entry }) },
         ],
       });
     }
@@ -6319,6 +6625,13 @@
     function downloadFileEntry(itemOrEntry) {
       const entry = itemOrEntry?.entry || itemOrEntry;
       if (!entry?.path) return;
+      if (!backendFeatures.fileEndpoint) {
+        // Without the raw file endpoint only scanned media can be downloaded.
+        if (itemOrEntry?.scene) downloadSceneItem(itemOrEntry.scene);
+        else if (itemOrEntry?.imageItem) downloadImageItem(itemOrEntry.imageItem);
+        else setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       const link = document.createElement("a");
       link.href = folderBrowserFileURL(entry.path, { download: true });
       link.download = entry.basename || pathBasename(entry.path) || "file";
@@ -6542,7 +6855,18 @@
       setLoadingImages(true);
       setError("");
       try {
-        await callGQL(FILE_DELETE_MUTATION, { path: item.path });
+        if (backendFeatures.fileDelete) {
+          await callGQL(FILE_DELETE_MUTATION, { path: item.path });
+        } else {
+          await callGQL(IMAGES_DESTROY_MUTATION, {
+            input: {
+              ids: [item.imageID],
+              delete_file: true,
+              delete_generated: true,
+              destroy_file_entry: true,
+            },
+          });
+        }
         setSelectedImageIDs((current) => current.filter((id) => id !== item.imageID));
         if (lightboxImages.length <= 1) setLightboxIndex(null);
         refreshContent();
@@ -6626,6 +6950,10 @@
         setError("找不到文件路径，无法复制。");
         return;
       }
+      if (!copyEntries.every(canCopyEntry)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       const firstEntryTarget = initialMoveTargetIDForEntry(copyEntries[0]);
       const currentTreeNode = currentFolder?.id ? findTreeNode(folderTree, currentFolder.id) : null;
       setMoveTargetFolderID(currentTreeNode?.id || firstEntryTarget || folderTree[0]?.id || null);
@@ -6664,11 +6992,19 @@
             selectFolderByPath(joinFolderPath(destinationFolder.path, entry.basename || pathBasename(entry.path)));
           }
           refreshFoldersAndContent();
-        } else {
+        } else if (backendFeatures.fileMove) {
           await callGQL(FILE_MOVE_MUTATION, {
             path: entry.path,
             destination: destinationFolder.path,
             basename: null,
+          });
+          refreshContent();
+        } else {
+          await callGQL(MOVE_FILES_MUTATION, {
+            input: {
+              ids: [entry.file_id],
+              destination_folder_id: destinationFolder.id,
+            },
           });
           refreshContent();
         }
@@ -6686,6 +7022,10 @@
       const destinationFolder = findTreeNode(folderTree, moveTargetFolderID);
       const entries = moveDialog?.copyEntries || (moveDialog?.entry ? [moveDialog.entry] : []);
       if (!entries.length || !destinationFolder?.path) return;
+      if (!entries.every(canCopyEntry)) {
+        setError(UNSUPPORTED_BACKEND_HINT);
+        return;
+      }
       setLoading(true);
       setError("");
       try {
@@ -6833,13 +7173,27 @@
       deleteCurrentFolder();
     }
 
+    const currentFolderMutable = canMutateFolder(currentFolder);
+    const currentFolderEntry = folderActionEntry(currentFolder);
+    const folderCapabilities = {
+      hint: UNSUPPORTED_BACKEND_HINT,
+      createFolder: backendFeatures.folderCreate,
+      uploadFiles: backendFeatures.fileUpload,
+      uploadFolder: backendFeatures.folderUpload,
+      renameFolder: currentFolderMutable && canRenameEntry(currentFolderEntry),
+      moveFolder: currentFolderMutable && canMoveEntry(currentFolderEntry),
+      copyFolder: currentFolderMutable && canCopyEntry(currentFolderEntry),
+      deleteFolder: currentFolderMutable && canDeleteEntry(currentFolderEntry),
+      copyFiles: backendFeatures.fileCopy,
+    };
+
     function renderSidebar(className, includeResizer, treeRef = null) {
       return React.createElement(
         "aside",
         { className },
         React.createElement(FileActionToolbar, {
           currentFolder,
-          canActOnCurrentFolder: canMutateFolder(currentFolder),
+          capabilities: folderCapabilities,
           selectedCount: selectedMediaCount,
           selectedImageCount: selectedImages.length,
           selectedSceneCount: selectedScenes.length,
@@ -7056,7 +7410,7 @@
                   previewAllVisible,
                   sizeIndex: activeSizeIndex,
                   copyJobs,
-                  canActOnCurrentFolder: canMutateFolder(currentFolder),
+                  capabilities: folderCapabilities,
                   onClearCopyJobs: clearCopyJobs,
                   controlsOpen: mobileControlsOpen,
                   onControlsToggle: () => setMobileControlsOpen((current) => !current),
@@ -7167,7 +7521,7 @@
             onDownload: downloadImageItem,
             onDelete: deleteImageItem,
             onMoveFile: moveImageItem,
-            onCopyFile: copyImageItem,
+            onCopyFile: backendFeatures.fileCopy ? copyImageItem : undefined,
           }),
           React.createElement(FilePreview, {
             preview: filePreview,
@@ -7197,6 +7551,7 @@
               ? React.createElement(MobileSelectionBar, {
                   selectedCount: selectedMediaCount,
                   selectedImageCount: selectedImages.length,
+                  canCopy: backendFeatures.fileCopy,
                   onDownload: downloadSelectedImages,
                   onMove: moveSelectedMedia,
                   onCopy: copySelectedMedia,
@@ -7209,6 +7564,7 @@
         ),
         React.createElement(ContextMenu, {
           menu: contextMenu,
+          canCopy: backendFeatures.fileCopy,
           onOpen: openContextMedia,
           onDownload: downloadContextMedia,
           onRename: renameContextMedia,

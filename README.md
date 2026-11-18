@@ -56,10 +56,36 @@ Backend-level items, such as media scanning, old AVI sprite generation
 robustness, full folder filesystem operations, and native offline iPhone
 caching, remain outside this plugin's scope.
 
+## Backend Compatibility
+
+Some file management features call GraphQL operations (`folderListEntries`,
+`folderCreate`, `fileUpload`, `fileCopy`, ...) and a `/folder-browser/file`
+endpoint that only exist in a Stash build with the folder management
+extension. Since 0.4.37 the plugin detects what the running Stash offers and
+works on an unmodified (upstream) Stash too:
+
+| Feature                                                  | Upstream Stash                                                                       | Stash with extension                |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------- |
+| Folder tree, video/image walls, lightbox, scene playback | Yes                                                                                  | Yes                                 |
+| `其他` view                                              | Sub-folders and scanned files only (e.g. zip galleries)                              | All files, including unscanned ones |
+| Rename / move / delete scanned media                     | Yes (`moveFiles`, `scenesDestroy`, `imagesDestroy`, `galleryDestroy`, `deleteFiles`) | Yes                                 |
+| Rename / move / delete folders                           | Disabled                                                                             | Yes                                 |
+| New folder, upload, copy                                 | Disabled                                                                             | Yes                                 |
+| Download / preview of non-media files                    | Disabled                                                                             | Yes                                 |
+
+Unsupported actions stay visible but disabled, with a tooltip explaining why.
+
+Known limitations on upstream Stash:
+
+- After renaming or moving a zip gallery, Stash keeps the old virtual folder
+  record until its **Clean** task runs (Settings -> Tasks -> Clean), so the old
+  name may appear as a folder until then.
+- Files that Stash has not scanned do not appear in the `其他` view.
+
 Use this source URL in Stash:
 
 ```text
-https://raw.githubusercontent.com/Warden630/stash-folder-browser-plugin-source/main/index.yml
+https://raw.githubusercontent.com/lwshen/stash-folder-browser-plugin-source/main/index.yml
 ```
 
 Use that URL in:
